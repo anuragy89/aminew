@@ -29,11 +29,43 @@ jobs:
           tags: music-bot:ci
 
       - name: Run smoke tests
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          LOGGER_ID: ${{ secrets.LOGGER_ID }}
+          OWNER_ID: ${{ secrets.OWNER_ID }}
+          STRING_SESSION: ${{ secrets.STRING_SESSION }}
+          MONGO_DB_URI: ${{ secrets.MONGO_DB_URI }}
+          YT_API_KEY: ${{ secrets.YT_API_KEY }}
         run: |
           echo "Checking Python version inside image"
           docker run --rm music-bot:ci python --version
+          
           echo "Checking ffmpeg availability inside image"
           docker run --rm music-bot:ci ffmpeg -version
+          
+          echo "Starting bot with REAL credentials from Secrets..."
+          # Note: We use quotes "$VAR" to handle special characters safely
+          docker run -d --name test-bot \
+            -e API_ID="$API_ID" \
+            -e API_HASH="$API_HASH" \
+            -e BOT_TOKEN="$BOT_TOKEN" \
+            -e LOGGER_ID="$LOGGER_ID" \
+            -e OWNER_ID="$OWNER_ID" \
+            -e STRING_SESSION="$STRING_SESSION" \
+            -e MONGO_DB_URI="$MONGO_DB_URI" \
+            -e YT_API_KEY="$YT_API_KEY" \
+            music-bot:ci bash start
+            
+          echo "Waiting 60s for bot to connect..."
+          sleep 60
+          
+          echo "Dumping logs:"
+          docker logs test-bot
+          
+          # Clean up test container
+          docker rm -f test-bot
 
       - name: Clean up images
         run: docker image rm music-bot:ci || true
