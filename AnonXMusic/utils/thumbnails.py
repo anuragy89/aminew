@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 from unidecode import unidecode
 from ytSearch import VideosSearch
 
-from AnonXMusic import app
+from AnonXMusic import app, LOGGER
 from config import YOUTUBE_IMG_URL
 
 def changeImageSize(maxWidth, maxHeight, image):
@@ -88,7 +88,8 @@ async def get_thumb(videoid, user_id, title=None, duration=None, thumbnail=None,
         try:
             async for photo in app.get_chat_photos(user_id,1):
                 sp = await app.download_media(photo.file_id, file_name=f'{user_id}.jpg')
-        except:
+        except Exception as e:
+            LOGGER(__name__).error(e)
             async for photo in app.get_chat_photos(app.id, 1):
                 sp = await app.download_media(photo.file_id, file_name=f'{app.id}.jpg')
         
@@ -157,5 +158,5 @@ async def get_thumb(videoid, user_id, title=None, duration=None, thumbnail=None,
         background.save(f"cache/{videoid}_{user_id}.png")
         return f"cache/{videoid}_{user_id}.png"
     except Exception as e:
-        print(e)
+        LOGGER(__name__).error(e)
         return YOUTUBE_IMG_URL
