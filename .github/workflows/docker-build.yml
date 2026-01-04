@@ -1,0 +1,38 @@
+name: Docker build & smoke tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build Docker image (no push)
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: music-bot:ci
+
+      - name: Run smoke tests
+        run: |
+          echo "Checking Python version inside image"
+          docker run --rm music-bot:ci python --version
+          echo "Checking ffmpeg availability inside image"
+          docker run --rm music-bot:ci ffmpeg -version
+
+      - name: Clean up images
+        run: docker image rm music-bot:ci || true
