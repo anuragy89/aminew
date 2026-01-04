@@ -29,34 +29,17 @@ Introducing a **robust API** for Telegram Music Bots that allows **audio & video
 - ✅ Affordable Monthly Plans  
 - ✅ Easy Integration (Python, Node.js, C++, etc.)
 
----
-
-## 💰 Pricing & Plans
-
-| 💼 Plan        | ⚡ Rate Limit         | ♾️ Usage     | 💵 Price (INR/month) | 🔑 Access Type    |
-|---------------|-----------------------|-------------|----------------------|------------------|
-| 🟢 **Lite**      | 3000 requests/day     | per month    | ₹99                  | API_KEY          |
-| 🔵 **Basic**     | 5000 requests/day     | per month    | ₹179                 | API_KEY          |
-| 🟣 **Pro**       | 10000 requests/day    | per month    | ₹349                 | API_KEY          |
-| 🔴 **Ultra pro** | 20000 requests/day    | per month    | ₹699                 | API_KEY          |
-
-> **Note:** API keys are unique to each user. The Unlimited plan is tied to a single IP address.
-
----
-
-
-
 ## ⚙️ API Usage
 
 **Base Endpoint**
 
 🔑 API Access Key
 
-Contact US [𝐀𝐏𝐈 𝐚𝐧𝐝 𝐩𝐫𝐨𝐦𝐨𝐭𝐢𝐨𝐧](https://t.me/Api_and_promotion)
+Contact US [𝐀𝐏𝐈 𝐚𝐧𝐝 𝐩𝐫𝐨𝐦𝐨𝐭𝐢𝐨𝐧](https://music.xbitcode.com)
 
-> Online Documentation: https://tgapi.xbitcode.com/docs
-> Get your API key from :[ https://t.me/tgmusic_apibot](https://t.me/tgmusic_apibot)
-> Use your key in config.py
+> Online Documentation: https://music.xbitcode.com
+> Get your API key from :[ Music Api](https://music.xbitcode.com)
+> Use your key in .env
 > API key patter: xbit_10000000xx0233
 
 
@@ -70,7 +53,7 @@ Contact US [𝐀𝐏𝐈 𝐚𝐧𝐝 𝐩𝐫𝐨𝐦𝐨𝐭𝐢𝐨𝐧](http
 
 Need help or want to subscribe?
 
-Telegram:[𝐀𝐏𝐈 𝐚𝐧𝐝 𝐩𝐫𝐨𝐦𝐨𝐭𝐢𝐨𝐧](https://t.me/Api_and_promotion)
+Telegram:[𝐀𝐏𝐈 𝐚𝐧𝐝 𝐩𝐫𝐨𝐦𝐨𝐭𝐢𝐨𝐧](https://music.xbitcode.com)
 
 Maintained by:  [Xbitcode](https://xbitcode.com/)
 
