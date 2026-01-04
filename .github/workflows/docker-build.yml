@@ -25,6 +25,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: false
+          load: true
           tags: music-bot:ci
 
       - name: Run smoke tests
