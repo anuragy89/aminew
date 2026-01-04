@@ -67,7 +67,7 @@ TG_AUDIO_FILESIZE_LIMIT = int(getenv("TG_AUDIO_FILESIZE_LIMIT", 204857600))
 TG_VIDEO_FILESIZE_LIMIT = int(getenv("TG_VIDEO_FILESIZE_LIMIT", 2073741824))
 # Checkout https://www.gbmb.org/mb-to-bytes for converting mb to bytes
 
-# Get your pyrogram v2 session from @StringFatherBot on Telegram
+# Get your pyrogram v2 session from @SessionFatherBot on Telegram
 STRING1 = getenv("STRING_SESSION", None)
 STRING2 = getenv("STRING_SESSION2", None)
 STRING3 = getenv("STRING_SESSION3", None)
@@ -82,9 +82,10 @@ votemode = {}
 autoclean = []
 confirmer = {}
 
-START_IMG_URL = ["https://te.legra.ph/file/5fd13f2cc0d03bce9f7f2.jpg",
-                 "https://te.legra.ph/file/c15d01b3e6b40ea141dc9.jpg",
-                 "https://te.legra.ph/file/5fd13f2cc0d03bce9f7f2.jpg"]
+START_IMG_URL = getenv(
+    "START_IMG_URL",
+    "https://te.legra.ph/file/5fd13f2cc0d03bce9f7f2.jpg https://te.legra.ph/file/c15d01b3e6b40ea141dc9.jpg https://te.legra.ph/file/5fd13f2cc0d03bce9f7f2.jpg",
+).split()
     
 PING_IMG_URL = getenv(
     "PING_IMG_URL", "https://telegra.ph/file/87f680aead03443f291b0.jpg"
