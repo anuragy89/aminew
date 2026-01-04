@@ -11,6 +11,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    environment: music bot
 
     steps:
       - name: Checkout repository
@@ -44,6 +45,11 @@ jobs:
           
           echo "Checking ffmpeg availability inside image"
           docker run --rm music-bot:ci ffmpeg -version
+          
+          echo "Checking environment variables..."
+          echo "LOGGER_ID length: ${#LOGGER_ID}"
+          if [ -z "$API_ID" ]; then echo "API_ID is EMPTY"; else echo "API_ID is SET"; fi
+          if [ -z "$BOT_TOKEN" ]; then echo "BOT_TOKEN is EMPTY"; else echo "BOT_TOKEN is SET"; fi
           
           echo "Starting bot with REAL credentials from Secrets..."
           # Note: We use quotes "$VAR" to handle special characters safely
