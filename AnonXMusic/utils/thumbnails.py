@@ -85,13 +85,22 @@ async def get_thumb(videoid, user_id, title=None, duration=None, thumbnail=None,
                     await f.write(await resp.read())
                     await f.close()
         
+        sp = None
         try:
-            async for photo in app.get_chat_photos(user_id,1):
-                sp = await app.download_media(photo.file_id, file_name=f'{user_id}.jpg')
+            async for photo in app.get_chat_photos(user_id, 1):
+                sp = await app.download_media(photo.file_id, file_name=f"{user_id}.jpg")
         except Exception as e:
-            LOGGER(__name__).error(e)
-            async for photo in app.get_chat_photos(app.id, 1):
-                sp = await app.download_media(photo.file_id, file_name=f'{app.id}.jpg')
+            LOGGER(__name__).error(f"error 1 {e}")
+
+        if not sp:
+            try:
+                async for photo in app.get_chat_photos(app.id, 1):
+                    sp = await app.download_media(photo.file_id, file_name=f"{app.id}.jpg")
+            except Exception as e:
+                LOGGER(__name__).error(f"error 2{e}")
+
+        if not sp:
+            sp = f"cache/thumb{videoid}.png"
         
         xp = Image.open(sp)
         youtube = Image.open(f"cache/thumb{videoid}.png")
@@ -158,5 +167,5 @@ async def get_thumb(videoid, user_id, title=None, duration=None, thumbnail=None,
         background.save(f"cache/{videoid}_{user_id}.png")
         return f"cache/{videoid}_{user_id}.png"
     except Exception as e:
-        LOGGER(__name__).error(e)
+        LOGGER(__name__).error(f"error 3 {e}")
         return YOUTUBE_IMG_URL
