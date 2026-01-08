@@ -20,6 +20,7 @@ MONGO_DB_NAME = getenv("MONGO_DB_NAME", "Stranger")
 # Vars For API End Pont.
 YTPROXY_URL = getenv("YTPROXY_URL", 'https://tgapi.xbitcode.com') ## xBit Music Endpoint.
 YT_API_KEY = getenv("YT_API_KEY" , None ) ## Get your api key from https://music.xbitcode.com
+STREAMING = getenv("STREAMING" , False )
 
 ## Other vaes
 DURATION_LIMIT_MIN = int(getenv("DURATION_LIMIT", 300))

@@ -303,22 +303,8 @@ class Call(PyTgCalls):
                 link,
                 audio_parameters=AudioQuality.HIGH,video_parameters=VideoQuality.SD_480p
                 )
-            # stream = AudioVideoPiped(
-            #     link,
-            #     audio_parameters=HighQualityAudio(),
-            #     video_parameters=MediumQualityVideo(),
-            # )
         else:
-            stream = (
-                MediaStream(
-                    link,
-                    audio_parameters=AudioQuality.HIGH,
-                    video_parameters=VideoQuality.SD_480p,
-                    
-                )
-                if video
-                else MediaStream(link, audio_parameters=AudioQuality.HIGH,video_flags=MediaStream.Flags.IGNORE)
-            )
+            stream = MediaStream(link, audio_parameters=AudioQuality.HIGH,video_flags=MediaStream.Flags.IGNORE)
         try:
             await assistant.play(
                 chat_id,

@@ -15,7 +15,7 @@ from urllib3.util.retry import Retry
 from ytSearch import VideosSearch, Playlist
 from AnonXMusic import LOGGER
 from AnonXMusic.utils.formatters import time_to_seconds
-from config import YT_API_KEY, YTPROXY_URL as YTPROXY
+from config import STREAMING, YT_API_KEY, YTPROXY_URL as YTPROXY
 
 logger = LOGGER(__name__)
 
@@ -185,6 +185,8 @@ class YouTubeAPI:
         media_url = await self._fetch_media_url(vid_id, media_type)
         if not media_url:
             return None
+        elif STREAMING:
+            return media_url
         
         return await self._download_parallel(media_url, filepath, self._get_headers())
         

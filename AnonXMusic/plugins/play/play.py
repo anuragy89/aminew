@@ -288,6 +288,7 @@ async def play_commnd(
                 return await mystic.edit_text(err)
             return await mystic.delete()
         else:
+            return await mystic.edit_text(f"» Streams are no longer supported.")
             try:
                 await Anony.stream_call(url)
             except NoActiveGroupCall:
