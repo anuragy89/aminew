@@ -135,7 +135,7 @@ class YouTubeAPI:
             total_size = await self._get_content_length(url, headers)
             
             if total_size == 0 or total_size < 5 * 1024 * 1024:
-                return await self._download_single(url, filepath, headers)
+                return await self._download_single(url, filepath, {**headers, "Range": f"bytes=0-{total_size}"})
             
             chunk_size = total_size // num_connections
             ranges = [
