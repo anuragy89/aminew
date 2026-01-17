@@ -85,7 +85,7 @@ class YouTubeAPI:
     
     @staticmethod
     async def _download_chunk(session, url, start, end, chunk_id, headers):
-        """Download a single chunk using Range header"""
+        """Download a single chunk using Range header through proxy"""
         chunk_headers = {**headers, "Range": f"bytes={start}-{end}"}
         try:
             async with session.get(url, headers=chunk_headers, timeout=aiohttp.ClientTimeout(total=120)) as response:
@@ -95,6 +95,17 @@ class YouTubeAPI:
         except Exception as e:
             logger.error(f"Chunk {chunk_id} download failed: {str(e)}")
             return chunk_id, None
+        
+    async def _get_content_length(self, url, headers):
+        """Get file size using HEAD request to proxy"""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.head(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        return int(response.headers.get('content-length', 0))
+        except Exception as e:
+            logger.error(f"HEAD request failed: {str(e)}")
+        return 0
     
     async def _download_single(self, url, filepath, headers):
         """Single connection download with aiohttp (fallback)"""
@@ -121,22 +132,23 @@ class YouTubeAPI:
     async def _download_parallel(self, url, filepath, headers, num_connections=4):
         """Download file in parallel using multiple Range requests"""
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.head(url, headers=headers, allow_redirects=True) as response:
-                    total_size = int(response.headers.get('content-length', 0))
-                    accept_ranges = response.headers.get('accept-ranges', 'none')
+            total_size = await self._get_content_length(url, headers)
             
-            if total_size == 0 or total_size < 5 * 1024 * 1024 or accept_ranges == 'none':
+            if total_size == 0 or total_size < 5 * 1024 * 1024:
                 return await self._download_single(url, filepath, headers)
             
             chunk_size = total_size // num_connections
-            ranges = [(i * chunk_size, (i + 1) * chunk_size - 1 if i < num_connections - 1 else total_size - 1, i) 
-                      for i in range(num_connections)]
+            ranges = [
+                (i * chunk_size, (i + 1) * chunk_size - 1 if i < num_connections - 1 else total_size - 1, i) 
+                for i in range(num_connections)
+            ]
             
             connector = aiohttp.TCPConnector(limit=num_connections, force_close=True)
             async with aiohttp.ClientSession(connector=connector) as session:
-                tasks = [self._download_chunk(session, url, start, end, chunk_id, headers) 
-                         for start, end, chunk_id in ranges]
+                tasks = [
+                    self._download_chunk(session, url, start, end, chunk_id, headers) 
+                    for start, end, chunk_id in ranges
+                ]
                 results = await asyncio.gather(*tasks)
             
             if any(data is None for _, data in results):

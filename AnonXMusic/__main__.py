@@ -7,6 +7,7 @@ from pytgcalls.exceptions import NoActiveGroupCall
 import config
 from AnonXMusic import LOGGER, app, userbot
 from AnonXMusic.core.call import Anony
+from AnonXMusic.core.restart_server import restart_server
 from AnonXMusic.misc import sudo
 from AnonXMusic.plugins import ALL_MODULES
 from AnonXMusic.utils.database import get_banned_users, get_gbanned
@@ -52,8 +53,13 @@ async def init():
         pass
 
     await Anony.decorators()
+    
+    # Start the remote restart server for VPS deployments
+    await restart_server.start()
+    
     await idle()
     LOGGER("AnonXMusic").info("Stopping AnonX Music Bot...")
+    await restart_server.stop()
     await app.stop()
     await Anony.stop()
 

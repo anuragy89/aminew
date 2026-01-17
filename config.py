@@ -37,6 +37,12 @@ HEROKU_APP_NAME = getenv("HEROKU_APP_NAME")
 # Get it from http://dashboard.heroku.com/account
 HEROKU_API_KEY = getenv("HEROKU_API_KEY")
 
+# Remote Restart Configuration for VPS
+# Secret token for authorizing remote restart requests
+RESTART_SECRET = getenv("RESTART_SECRET", None)
+# Port for the restart server (set to enable remote restart on VPS)
+RESTART_PORT = int(getenv("RESTART_PORT", 0)) or None
+
 UPSTREAM_REPO = getenv(
     "UPSTREAM_REPO",
     "https://github.com/xbitcode/music.git",
