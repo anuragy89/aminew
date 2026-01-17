@@ -87,74 +87,54 @@ class YouTubeAPI:
     async def _download_chunk(session, url, start, end, chunk_id, headers):
         """Download a single chunk using Range header through proxy"""
         chunk_headers = {**headers, "Range": f"bytes={start}-{end}"}
-        chunk_size = end - start + 1
-        logger.info(f"[CHUNK {chunk_id}] Starting download: bytes {start}-{end} ({chunk_size / 1024 / 1024:.2f} MB)")
         try:
             async with session.get(url, headers=chunk_headers, timeout=aiohttp.ClientTimeout(total=120)) as response:
                 if response.status in (200, 206):
-                    data = await response.read()
-                    logger.info(f"[CHUNK {chunk_id}] Completed successfully: received {len(data) / 1024 / 1024:.2f} MB")
-                    return chunk_id, data
-                logger.warning(f"[CHUNK {chunk_id}] Failed with status {response.status}")
+                    return chunk_id, await response.read()
                 return chunk_id, None
         except Exception as e:
-            logger.error(f"[CHUNK {chunk_id}] Download failed: {str(e)}")
+            logger.error(f"Chunk {chunk_id} download failed: {str(e)}")
             return chunk_id, None
         
     async def _get_content_length(self, url, headers):
         """Get file size using HEAD request to proxy"""
-        logger.info(f"[HEAD] Fetching content length from URL...")
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.head(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
                     if response.status == 200:
-                        content_length = int(response.headers.get('content-length', 0))
-                        logger.info(f"[HEAD] Content-Length: {content_length} bytes ({content_length / 1024 / 1024:.2f} MB)")
-                        return content_length
-                    logger.warning(f"[HEAD] Request returned status {response.status}")
+                        return int(response.headers.get('content-length', 0))
         except Exception as e:
-            logger.error(f"[HEAD] Request failed: {str(e)}")
+            logger.error(f"HEAD request failed: {str(e)}")
         return 0
     
     async def _download_single(self, url, filepath, headers):
         """Single connection download with aiohttp (fallback)"""
-        logger.info(f"[SINGLE DOWNLOAD] Starting single-connection download to: {filepath}")
         try:
             timeout = aiohttp.ClientTimeout(total=300)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url, headers=headers, allow_redirects=True) as response:
                     if response.status != 200:
-                        logger.error(f"[SINGLE DOWNLOAD] Failed with status {response.status}")
+                        logger.error(f"Download failed with status {response.status}")
                         return None
                     
-                    total_bytes = 0
                     with open(filepath, 'wb') as f:
                         async for chunk in response.content.iter_chunked(1024 * 1024):
                             f.write(chunk)
-                            total_bytes += len(chunk)
-                            logger.info(f"[SINGLE DOWNLOAD] Progress: {total_bytes / 1024 / 1024:.2f} MB downloaded")
             
-            logger.info(f"[SINGLE DOWNLOAD] Completed: {total_bytes / 1024 / 1024:.2f} MB saved to {filepath}")
             return filepath
             
         except Exception as e:
-            logger.error(f"[SINGLE DOWNLOAD] Failed: {str(e)}")
+            logger.error(f"Single download failed: {str(e)}")
             if os.path.exists(filepath):
                 os.remove(filepath)
             return None
     
     async def _download_parallel(self, url, filepath, headers, num_connections=4):
         """Download file in parallel using multiple Range requests"""
-        logger.info(f"[PARALLEL DOWNLOAD] Initiating parallel download to: {filepath}")
         try:
             total_size = await self._get_content_length(url, headers)
             
-            if total_size == 0:
-                logger.warning(f"[PARALLEL DOWNLOAD] Content-Length is 0, falling back to single download")
-                return await self._download_single(url, filepath, headers)
-            
-            if total_size < 5 * 1024 * 1024:
-                logger.info(f"[PARALLEL DOWNLOAD] File too small ({total_size / 1024 / 1024:.2f} MB < 5 MB), using single download")
+            if total_size == 0 or total_size < 5 * 1024 * 1024:
                 return await self._download_single(url, filepath, headers)
             
             chunk_size = total_size // num_connections
@@ -162,11 +142,6 @@ class YouTubeAPI:
                 (i * chunk_size, (i + 1) * chunk_size - 1 if i < num_connections - 1 else total_size - 1, i) 
                 for i in range(num_connections)
             ]
-            
-            logger.info(f"[PARALLEL DOWNLOAD] Starting {num_connections} parallel connections for {total_size / 1024 / 1024:.2f} MB file")
-            logger.info(f"[PARALLEL DOWNLOAD] Chunk size: {chunk_size / 1024 / 1024:.2f} MB each")
-            for start, end, chunk_id in ranges:
-                logger.info(f"[PARALLEL DOWNLOAD] Chunk {chunk_id}: bytes {start}-{end}")
             
             connector = aiohttp.TCPConnector(limit=num_connections, force_close=True)
             async with aiohttp.ClientSession(connector=connector) as session:
@@ -177,68 +152,54 @@ class YouTubeAPI:
                 results = await asyncio.gather(*tasks)
             
             if any(data is None for _, data in results):
-                logger.error("[PARALLEL DOWNLOAD] Some chunks failed, falling back to single connection")
+                logger.error("Some chunks failed, falling back to single connection")
                 return await self._download_single(url, filepath, headers)
             
             results.sort(key=lambda x: x[0])
-            total_written = 0
             with open(filepath, 'wb') as f:
-                for chunk_id, data in results:
+                for _, data in results:
                     f.write(data)
-                    total_written += len(data)
-                    logger.info(f"[PARALLEL DOWNLOAD] Wrote chunk {chunk_id}: {len(data) / 1024 / 1024:.2f} MB")
             
-            logger.info(f"[PARALLEL DOWNLOAD] Completed: {total_written / 1024 / 1024:.2f} MB saved to {filepath}")
             return filepath
             
         except Exception as e:
-            logger.error(f"[PARALLEL DOWNLOAD] Failed: {str(e)}, falling back to single connection")
+            logger.error(f"Parallel download failed: {str(e)}, falling back to single connection")
             return await self._download_single(url, filepath, headers)
     
     async def _fetch_media_url(self, vid_id, media_type='audio'):
         """Fetch audio/video URL from API (unified method)"""
-        logger.info(f"[FETCH URL] Fetching {media_type} URL for video ID: {vid_id}")
         try:
             session = self._get_session()
             response = session.get(f"{YTPROXY}/info/{vid_id}", headers=self._get_headers(), timeout=60)
             data = response.json()
             
             if data.get('status') == 'success':
-                media_url = data.get(f'{media_type}_url')
-                logger.info(f"[FETCH URL] Successfully retrieved {media_type} URL")
-                return media_url
+                return data.get(f'{media_type}_url')
             elif data.get('status') == 'error':
-                logger.error(f"[FETCH URL] API Error: {data.get('message', 'Unknown error from API.')}")
+                logger.error(f"API Error: {data.get('message', 'Unknown error from API.')}")
             else:
-                logger.error("[FETCH URL] Could not fetch Backend\nPlease contact API provider.")
+                logger.error("Could not fetch Backend\nPlease contact API provider.")
             return None
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"[FETCH URL] Network error while fetching {media_type} info: {str(e)}")
+            logger.error(f"Network error while fetching {media_type} info: {str(e)}")
         except json.JSONDecodeError as e:
-            logger.error(f"[FETCH URL] Invalid response from proxy: {str(e)}")
+            logger.error(f"Invalid response from proxy: {str(e)}")
         except Exception as e:
-            logger.error(f"[FETCH URL] Error fetching {media_type} URL: {str(e)}")
+            logger.error(f"Error fetching {media_type} URL: {str(e)}")
         return None
     
     async def _download_media(self, vid_id, filepath, media_type='audio'):
         """Unified download method for audio/video"""
-        logger.info(f"[DOWNLOAD] Starting {media_type} download for video ID: {vid_id}")
-        logger.info(f"[DOWNLOAD] Target filepath: {filepath}")
-        
         if os.path.exists(filepath):
-            logger.info(f"[DOWNLOAD] File already exists, skipping download: {filepath}")
             return filepath
         
         media_url = await self._fetch_media_url(vid_id, media_type)
         if not media_url:
-            logger.error(f"[DOWNLOAD] Failed to get media URL for {vid_id}")
             return None
         elif STREAMING:
-            logger.info(f"[DOWNLOAD] STREAMING mode enabled, returning URL directly")
             return media_url
         
-        logger.info(f"[DOWNLOAD] Proceeding with parallel download...")
         return await self._download_parallel(media_url, filepath, self._get_headers())
         
 
