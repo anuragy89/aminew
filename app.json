@@ -73,6 +73,26 @@
       "value": "",
       "required": true
     },
+    "STRING_SESSION2": {
+        "description": "A Pyrogram v2 String Session from @StringFatherBot on Telegram.",
+        "value": "",
+        "required": false
+      },
+      "STRING_SESSION3": {
+        "description": "A Pyrogram v2 String Session from @StringFatherBot on Telegram.",
+        "value": "",
+        "required": false
+      },
+      "STRING_SESSION4": {
+        "description": "A Pyrogram v2 String Session from @StringFatherBot on Telegram.",
+        "value": "",
+        "required": false
+      },
+      "STRING_SESSION5": {
+        "description": "A Pyrogram v2 String Session from @StringFatherBot on Telegram.",
+        "value": "",
+        "required": false
+      },
     "SUPPORT_CHANNEL": {
       "description": "Your Bot's Support Channel Username (with @).",
       "value": "",
