@@ -1,0 +1,28 @@
+[Unit]
+Description=Bot Manager Service - Manages multiple music bots on VPS
+Documentation=https://github.com/your-repo
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/bot-manager
+EnvironmentFile=/etc/bot-manager.env
+ExecStart=/usr/bin/python3 /opt/bot-manager/manager.py
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bot-manager
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target
