@@ -75,10 +75,21 @@ if curl -s "$MANAGER_URL/health" > /dev/null 2>&1; then
         exit 1
     fi
     
+    # Use Python to safely create JSON (prevents injection)
+    JSON_PAYLOAD=$(python3 -c "
+import json
+import sys
+print(json.dumps({
+    'bot_id': sys.argv[1],
+    'working_dir': sys.argv[2],
+    'start_command': sys.argv[3]
+}))
+" "$BOT_ID" "$WORKING_DIR" "$START_COMMAND")
+    
     RESPONSE=$(curl -s -X POST "$MANAGER_URL/bots" \
         -H "Content-Type: application/json" \
         -H "X-Manager-Secret: $MANAGER_SECRET" \
-        -d "{\"bot_id\": \"$BOT_ID\", \"working_dir\": \"$WORKING_DIR\", \"start_command\": \"$START_COMMAND\"}")
+        -d "$JSON_PAYLOAD")
     
     if echo "$RESPONSE" | grep -q '"success": true'; then
         echo -e "${GREEN}✓ Bot '$BOT_ID' registered successfully via API${NC}"
@@ -104,16 +115,22 @@ else
     fi
     
     # Use Python to safely update the JSON (handles concurrent access better)
-    sudo python3 << EOF
+    # Pass variables as arguments to avoid shell injection
+    sudo python3 - "$REGISTRY_FILE" "$BOT_ID" "$WORKING_DIR" "$START_COMMAND" << 'PYEOF'
 import json
 import fcntl
+import sys
 
-registry_file = "$REGISTRY_FILE"
+registry_file = sys.argv[1]
+bot_id = sys.argv[2]
+working_dir = sys.argv[3]
+start_command = sys.argv[4]
+
 bot_data = {
-    "bot_id": "$BOT_ID",
-    "working_dir": "$WORKING_DIR",
-    "start_command": "$START_COMMAND",
-    "pid_file": "/var/lib/bot-manager/pids/$BOT_ID.pid"
+    "bot_id": bot_id,
+    "working_dir": working_dir,
+    "start_command": start_command,
+    "pid_file": f"/var/lib/bot-manager/pids/{bot_id}.pid"
 }
 
 with open(registry_file, "r+") as f:
@@ -122,14 +139,14 @@ with open(registry_file, "r+") as f:
         data = json.load(f)
         if "bots" not in data:
             data["bots"] = {}
-        data["bots"]["$BOT_ID"] = bot_data
+        data["bots"][bot_id] = bot_data
         f.seek(0)
         f.truncate()
         json.dump(data, f, indent=2)
         print("Bot registered successfully")
     finally:
         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-EOF
+PYEOF
     
     echo -e "${GREEN}✓ Bot '$BOT_ID' registered directly to registry${NC}"
 fi

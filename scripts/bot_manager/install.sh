@@ -59,7 +59,9 @@ if [ -f "$ENV_FILE" ]; then
         NEW_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
         echo "MANAGER_SECRET=$NEW_SECRET" > "$ENV_FILE"
         echo "MANAGER_PORT=6969" >> "$ENV_FILE"
+        chmod 600 "$ENV_FILE"
         echo -e "${GREEN}✓ New secret generated${NC}"
+        echo -e "${YELLOW}Your MANAGER_SECRET is: $NEW_SECRET${NC}"
     fi
 else
     NEW_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
@@ -108,19 +110,24 @@ echo -e "${GREEN}✓ Systemd service created and enabled${NC}"
 
 echo -e "${YELLOW}Step 6: Setting up nginx...${NC}"
 if command -v nginx &> /dev/null; then
-    if [ -f "$NGINX_CONF" ]; then
-        echo -e "${YELLOW}Nginx config already exists, backing up...${NC}"
-        cp "$NGINX_CONF" "$NGINX_CONF.bak"
-    fi
-    
-    cp "$SCRIPT_DIR/nginx.conf" "$NGINX_CONF"
-    
-    # Test nginx config
-    if nginx -t 2>/dev/null; then
-        systemctl reload nginx
-        echo -e "${GREEN}✓ Nginx configured and reloaded${NC}"
+    if [ ! -f "$SCRIPT_DIR/nginx.conf" ]; then
+        echo -e "${RED}✗ nginx.conf not found in $SCRIPT_DIR${NC}"
+        echo -e "${YELLOW}Skipping nginx setup - you can configure it manually later${NC}"
     else
-        echo -e "${RED}✗ Nginx config test failed, please check $NGINX_CONF${NC}"
+        if [ -f "$NGINX_CONF" ]; then
+            echo -e "${YELLOW}Nginx config already exists, backing up...${NC}"
+            cp "$NGINX_CONF" "$NGINX_CONF.bak"
+        fi
+        
+        cp "$SCRIPT_DIR/nginx.conf" "$NGINX_CONF"
+    
+        # Test nginx config
+        if nginx -t 2>/dev/null; then
+            systemctl reload nginx
+            echo -e "${GREEN}✓ Nginx configured and reloaded${NC}"
+        else
+            echo -e "${RED}✗ Nginx config test failed, please check $NGINX_CONF${NC}"
+        fi
     fi
 else
     echo -e "${YELLOW}Nginx not installed, skipping nginx setup${NC}"

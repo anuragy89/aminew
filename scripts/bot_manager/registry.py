@@ -91,14 +91,35 @@ def add_bot(bot_id: str, working_dir: str, start_command: str = "bash start") ->
     """
     ensure_directories()
     
-    registry = read_registry()
-    registry["bots"][bot_id] = {
-        "bot_id": bot_id,
-        "working_dir": working_dir,
-        "start_command": start_command,
-        "pid_file": f"{PIDS_DIR}/{bot_id}.pid"
-    }
-    write_registry(registry)
+    # Use exclusive lock for atomic read-modify-write
+    if not os.path.exists(REGISTRY_FILE):
+        with open(REGISTRY_FILE, "w") as f:
+            json.dump({"bots": {}}, f)
+    
+    with open(REGISTRY_FILE, "r+") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            f.seek(0)
+            try:
+                registry = json.load(f)
+            except json.JSONDecodeError:
+                registry = {"bots": {}}
+            
+            if "bots" not in registry:
+                registry["bots"] = {}
+            
+            registry["bots"][bot_id] = {
+                "bot_id": bot_id,
+                "working_dir": working_dir,
+                "start_command": start_command,
+                "pid_file": f"{PIDS_DIR}/{bot_id}.pid"
+            }
+            
+            f.seek(0)
+            f.truncate()
+            json.dump(registry, f, indent=2)
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     return True
 
 

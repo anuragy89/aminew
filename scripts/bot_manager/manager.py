@@ -122,7 +122,7 @@ async def get_bot_status(request):
     })
 
 
-def kill_bot_process(bot_id: str) -> tuple[bool, Optional[str]]:
+async def kill_bot_process(bot_id: str) -> tuple[bool, Optional[str]]:
     """
     Force kill a bot process.
     
@@ -137,10 +137,11 @@ def kill_bot_process(bot_id: str) -> tuple[bool, Optional[str]]:
         # Force kill with SIGKILL (-9)
         os.kill(pid, signal.SIGKILL)
         # Wait a moment for process to die
+        import time
         for _ in range(10):
             try:
                 os.kill(pid, 0)  # Check if still alive
-                asyncio.sleep(0.1)
+                time.sleep(0.1)
             except ProcessLookupError:
                 break
         registry.remove_pid(bot_id)
@@ -157,7 +158,7 @@ def kill_bot_process(bot_id: str) -> tuple[bool, Optional[str]]:
         return False, str(e)
 
 
-def start_bot_process(bot_id: str) -> tuple[bool, Optional[str], Optional[int]]:
+async def start_bot_process(bot_id: str) -> tuple[bool, Optional[str], Optional[int]]:
     """
     Start a bot process.
     
@@ -202,8 +203,7 @@ def start_bot_process(bot_id: str) -> tuple[bool, Optional[str], Optional[int]]:
             pid = registry.get_pid(bot_id)
             if pid:
                 return True, None, pid
-            import time
-            time.sleep(0.1)
+            await asyncio.sleep(0.1)
         
         # If no PID file after 2 seconds, check if process is still alive
         if process.poll() is None:
@@ -228,7 +228,7 @@ async def restart_bot(request):
         return error_response(f"Bot '{bot_id}' not found", 404)
     
     # Kill the bot
-    kill_success, kill_error = kill_bot_process(bot_id)
+    kill_success, kill_error = await kill_bot_process(bot_id)
     if not kill_success:
         return error_response(f"Failed to kill bot: {kill_error}", 500)
     
@@ -236,7 +236,7 @@ async def restart_bot(request):
     await asyncio.sleep(0.5)
     
     # Start the bot
-    start_success, start_error, pid = start_bot_process(bot_id)
+    start_success, start_error, pid = await start_bot_process(bot_id)
     if not start_success:
         return json_response({
             "success": False,
@@ -268,7 +268,7 @@ async def stop_bot(request):
     if not pid:
         return success_response(f"Bot '{bot_id}' is not running")
     
-    kill_success, kill_error = kill_bot_process(bot_id)
+    kill_success, kill_error = await kill_bot_process(bot_id)
     if not kill_success:
         return error_response(f"Failed to stop bot: {kill_error}", 500)
     
@@ -296,7 +296,7 @@ async def start_bot(request):
             "already_running": True,
         })
     
-    start_success, start_error, pid = start_bot_process(bot_id)
+    start_success, start_error, pid = await start_bot_process(bot_id)
     if not start_success:
         return error_response(f"Failed to start bot: {start_error}", 500)
     
