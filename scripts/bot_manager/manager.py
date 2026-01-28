@@ -137,11 +137,10 @@ async def kill_bot_process(bot_id: str) -> tuple[bool, Optional[str]]:
         # Force kill with SIGKILL (-9)
         os.kill(pid, signal.SIGKILL)
         # Wait a moment for process to die
-        import time
         for _ in range(10):
             try:
                 os.kill(pid, 0)  # Check if still alive
-                time.sleep(0.1)
+                await asyncio.sleep(0.1)
             except ProcessLookupError:
                 break
         registry.remove_pid(bot_id)

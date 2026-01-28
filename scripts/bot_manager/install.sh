@@ -126,6 +126,10 @@ if command -v nginx &> /dev/null; then
             systemctl reload nginx
             echo -e "${GREEN}✓ Nginx configured and reloaded${NC}"
         else
+            if [ -f "$NGINX_CONF.bak" ]; then
+                cp "$NGINX_CONF.bak" "$NGINX_CONF"
+                echo -e "${YELLOW}Restored previous nginx config from backup${NC}"
+            fi
             echo -e "${RED}✗ Nginx config test failed, please check $NGINX_CONF${NC}"
         fi
     fi
