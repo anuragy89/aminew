@@ -74,8 +74,13 @@ else
 fi
 
 echo -e "${YELLOW}Step 4: Installing Python dependencies...${NC}"
-pip3 install aiohttp >/dev/null 2>&1 || pip install aiohttp >/dev/null 2>&1
-echo -e "${GREEN}✓ Dependencies installed${NC}"
+# Use || true to prevent set -e from exiting on pip failure
+if pip3 install aiohttp >/dev/null 2>&1 || pip install aiohttp >/dev/null 2>&1; then
+    echo -e "${GREEN}✓ Dependencies installed${NC}"
+else
+    echo -e "${YELLOW}⚠ aiohttp may already be installed or install failed${NC}"
+    echo -e "${YELLOW}You can install manually: pip3 install aiohttp${NC}"
+fi
 
 echo -e "${YELLOW}Step 5: Creating systemd service...${NC}"
 cat > "$SERVICE_FILE" << 'EOF'
