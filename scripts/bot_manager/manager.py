@@ -124,7 +124,7 @@ async def get_bot_status(request):
 
 async def kill_bot_process(bot_id: str) -> tuple[bool, Optional[str]]:
     """
-    Force kill a bot process.
+    Force kill a bot process and all its children.
     
     Returns:
         (success, error_message)
@@ -134,15 +134,39 @@ async def kill_bot_process(bot_id: str) -> tuple[bool, Optional[str]]:
         return True, None  # Not running is success for kill
     
     try:
-        # Force kill with SIGKILL (-9)
-        os.kill(pid, signal.SIGKILL)
-        # Wait a moment for process to die
+        # First, try to kill the entire process group
+        # This ensures child processes (like Python spawned by uv) are also killed
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        
+        # Also try to find and kill child processes using pkill
+        # This handles cases where the process group approach doesn't work
+        bot = registry.get_bot(bot_id)
+        if bot:
+            working_dir = bot.get("working_dir", "")
+            # Kill any python processes running AnonXMusic from this directory
+            subprocess.run(
+                f"pkill -9 -f 'python.*AnonXMusic' 2>/dev/null || true",
+                shell=True,
+                cwd=working_dir,
+            )
+        
+        # Try to kill the specific PID as well
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        
+        # Wait a moment for processes to die
         for _ in range(10):
             try:
                 os.kill(pid, 0)  # Check if still alive
                 await asyncio.sleep(0.1)
             except ProcessLookupError:
                 break
+        
         registry.remove_pid(bot_id)
         if bot_id in bot_start_times:
             del bot_start_times[bot_id]
@@ -180,36 +204,64 @@ async def start_bot_process(bot_id: str) -> tuple[bool, Optional[str], Optional[
         return False, f"Working directory does not exist: {working_dir}", None
     
     try:
-        # Start the bot process in background
-        # We use nohup and redirect output to prevent blocking
-        process = subprocess.Popen(
-            start_command,
-            shell=True,
-            cwd=working_dir,
-            start_new_session=True,  # Detach from this process
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-        )
+        # Create log file for debugging
+        log_file = os.path.join(working_dir, "manager_start.log")
+        
+        # Build environment with PATH and load .env
+        env = os.environ.copy()
+        env_file = os.path.join(working_dir, ".env")
+        if os.path.exists(env_file):
+            with open(env_file, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, _, value = line.partition("=")
+                        key = key.strip()
+                        value = value.strip()
+                        # Remove surrounding quotes (single or double)
+                        if (value.startswith('"') and value.endswith('"')) or \
+                           (value.startswith("'") and value.endswith("'")):
+                            value = value[1:-1]
+                        env[key] = value
+        
+        # Ensure common paths are in PATH
+        env["PATH"] = f"/usr/local/bin:/usr/bin:/bin:/root/.local/bin:{env.get('PATH', '')}"
+        
+        # Start the bot process in background with nohup
+        # Use nohup to ensure process survives parent exit
+        with open(log_file, "w") as log_f:
+            process = subprocess.Popen(
+                f"nohup {start_command} >> {log_file} 2>&1 &",
+                shell=True,
+                cwd=working_dir,
+                env=env,
+                start_new_session=True,
+                stdout=log_f,
+                stderr=log_f,
+                stdin=subprocess.DEVNULL,
+            )
         
         # The actual bot PID will be written by the start script
         # We record the start time
         bot_start_times[bot_id] = datetime.now()
         
-        # Wait briefly and check if it started
-        await_time = 2
+        # Wait briefly and check if it started (up to 5 seconds)
+        await_time = 5
         for _ in range(await_time * 10):
             pid = registry.get_pid(bot_id)
             if pid:
                 return True, None, pid
             await asyncio.sleep(0.1)
         
-        # If no PID file after 2 seconds, check if process is still alive
-        if process.poll() is None:
-            # Process is running but hasn't written PID yet
-            return True, "Bot started but PID not yet written", process.pid
-        else:
-            return False, "Bot process exited immediately", None
+        # Check log file for errors
+        error_msg = "Bot process did not write PID file"
+        if os.path.exists(log_file):
+            with open(log_file, "r") as f:
+                log_content = f.read()[-500:]  # Last 500 chars
+                if log_content:
+                    error_msg = f"Start failed. Log: {log_content}"
+        
+        return False, error_msg, None
             
     except Exception as e:
         return False, str(e), None

@@ -74,12 +74,45 @@ else
 fi
 
 echo -e "${YELLOW}Step 4: Installing Python dependencies...${NC}"
-# Use || true to prevent set -e from exiting on pip failure
-if pip3 install aiohttp >/dev/null 2>&1 || pip install aiohttp >/dev/null 2>&1; then
+# Try multiple methods to install aiohttp
+INSTALLED=false
+
+# Method 1: Try pip3
+if command -v pip3 &> /dev/null; then
+    if pip3 install aiohttp >/dev/null 2>&1; then
+        INSTALLED=true
+    fi
+fi
+
+# Method 2: Try pip
+if [ "$INSTALLED" = false ] && command -v pip &> /dev/null; then
+    if pip install aiohttp >/dev/null 2>&1; then
+        INSTALLED=true
+    fi
+fi
+
+# Method 3: Try python3 -m pip
+if [ "$INSTALLED" = false ]; then
+    if python3 -m pip install aiohttp >/dev/null 2>&1; then
+        INSTALLED=true
+    fi
+fi
+
+# Method 4: Try apt (Debian/Ubuntu)
+if [ "$INSTALLED" = false ] && command -v apt &> /dev/null; then
+    if apt install -y python3-aiohttp >/dev/null 2>&1; then
+        INSTALLED=true
+    fi
+fi
+
+if [ "$INSTALLED" = true ]; then
     echo -e "${GREEN}✓ Dependencies installed${NC}"
 else
-    echo -e "${YELLOW}⚠ aiohttp may already be installed or install failed${NC}"
-    echo -e "${YELLOW}You can install manually: pip3 install aiohttp${NC}"
+    echo -e "${RED}✗ Failed to install aiohttp${NC}"
+    echo -e "${YELLOW}Please install manually using one of:${NC}"
+    echo -e "  apt install python3-pip && pip3 install aiohttp"
+    echo -e "  apt install python3-aiohttp"
+    echo -e "${YELLOW}Then restart the service: systemctl restart bot-manager${NC}"
 fi
 
 echo -e "${YELLOW}Step 5: Creating systemd service...${NC}"
