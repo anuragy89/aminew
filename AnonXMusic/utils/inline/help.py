@@ -1,12 +1,13 @@
 from typing import Union
 
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.enums import ButtonStyle
 
 from AnonXMusic import app
 
 
 def help_pannel(_, is_sudo, START: Union[bool, int] = None):
-    first = [InlineKeyboardButton(text=_["CLOSE_BUTTON"], callback_data=f"close")]
+    first = [InlineKeyboardButton(text=_["CLOSE_BUTTON"], callback_data=f"close", style=ButtonStyle.DANGER)]
     second = [
         InlineKeyboardButton(
             text=_["BACK_BUTTON"],

@@ -1,4 +1,5 @@
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.enums import ButtonStyle
 
 
 def stats_buttons(_, status):
@@ -25,6 +26,7 @@ def stats_buttons(_, status):
                 InlineKeyboardButton(
                     text=_["CLOSE_BUTTON"],
                     callback_data="close",
+                    style=ButtonStyle.DANGER,
                 ),
             ],
         ]
@@ -43,6 +45,7 @@ def back_stats_buttons(_):
                 InlineKeyboardButton(
                     text=_["CLOSE_BUTTON"],
                     callback_data="close",
+                    style=ButtonStyle.DANGER,
                 ),
             ],
         ]

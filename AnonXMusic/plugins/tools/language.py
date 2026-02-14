@@ -1,5 +1,6 @@
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from pyrogram.enums import ButtonStyle
 
 from AnonXMusic import app
 from AnonXMusic.utils.database import get_lang, set_lang
@@ -23,7 +24,7 @@ def lanuages_keyboard(_):
             text=_["BACK_BUTTON"],
             callback_data="settingsback_helper",
         ),
-        InlineKeyboardButton(text=_["CLOSE_BUTTON"], callback_data="close"),
+        InlineKeyboardButton(text=_["CLOSE_BUTTON"], callback_data="close", style=ButtonStyle.DANGER),
     ])
     
     return InlineKeyboardMarkup(rows)
