@@ -33,4 +33,4 @@ dependencies = [
 dev = []
 
 [tool.uv.sources]
-kurigram = { url = "https://github.com/KurimuzonAkuma/kurigram/archive/dev.zip" }
+kurigram = { url = "https://github.com/KurimuzonAkuma/kurigram/archive/adb2b0c107827229b843959060d06a6a20568ff3.zip" }
