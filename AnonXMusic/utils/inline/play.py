@@ -1,7 +1,7 @@
 import math
 
 from pyrogram.types import InlineKeyboardButton
-from pyrogram.enums import ButtonStyle
+# from pyrogram.enums import ButtonStyle  # TODO: re-enable when kurigram fixes icon_custom_emoji_id bug
 from AnonXMusic.utils.formatters import time_to_seconds
 
 
@@ -61,11 +61,11 @@ def stream_markup_timer(_, chat_id, played, dur):
             )
         ],
         [   
-            InlineKeyboardButton(text="▷", callback_data=f"ADMIN Resume|{chat_id}", style=ButtonStyle.PRIMARY),
-            InlineKeyboardButton(text="II", callback_data=f"ADMIN Pause|{chat_id}", style=ButtonStyle.PRIMARY),
-            InlineKeyboardButton(text="↻", callback_data=f"ADMIN Replay|{chat_id}", style=ButtonStyle.PRIMARY),
-            InlineKeyboardButton(text="‣‣I", callback_data=f"ADMIN Skip|{chat_id}", style=ButtonStyle.PRIMARY),
-            InlineKeyboardButton(text="▢", callback_data=f"ADMIN Stop|{chat_id}", style=ButtonStyle.DANGER),
+            InlineKeyboardButton(text="▷", callback_data=f"ADMIN Resume|{chat_id}"),  # style=ButtonStyle.PRIMARY
+            InlineKeyboardButton(text="II", callback_data=f"ADMIN Pause|{chat_id}"),  # style=ButtonStyle.PRIMARY
+            InlineKeyboardButton(text="↻", callback_data=f"ADMIN Replay|{chat_id}"),  # style=ButtonStyle.PRIMARY
+            InlineKeyboardButton(text="‣‣I", callback_data=f"ADMIN Skip|{chat_id}"),  # style=ButtonStyle.PRIMARY
+            InlineKeyboardButton(text="▢", callback_data=f"ADMIN Stop|{chat_id}"),  # style=ButtonStyle.DANGER
         ],
     ]
     
@@ -75,11 +75,11 @@ def stream_markup_timer(_, chat_id, played, dur):
 def stream_markup(_, chat_id):
     buttons = [
         [
-            InlineKeyboardButton(text="▷", callback_data=f"ADMIN Resume|{chat_id}", style=ButtonStyle.PRIMARY),
-            InlineKeyboardButton(text="II", callback_data=f"ADMIN Pause|{chat_id}", style=ButtonStyle.PRIMARY),
-            InlineKeyboardButton(text="↻", callback_data=f"ADMIN Replay|{chat_id}", style=ButtonStyle.PRIMARY),
-            InlineKeyboardButton(text="‣‣I", callback_data=f"ADMIN Skip|{chat_id}", style=ButtonStyle.PRIMARY),
-            InlineKeyboardButton(text="▢", callback_data=f"ADMIN Stop|{chat_id}", style=ButtonStyle.DANGER),
+            InlineKeyboardButton(text="▷", callback_data=f"ADMIN Resume|{chat_id}"),  # style=ButtonStyle.PRIMARY
+            InlineKeyboardButton(text="II", callback_data=f"ADMIN Pause|{chat_id}"),  # style=ButtonStyle.PRIMARY
+            InlineKeyboardButton(text="↻", callback_data=f"ADMIN Replay|{chat_id}"),  # style=ButtonStyle.PRIMARY
+            InlineKeyboardButton(text="‣‣I", callback_data=f"ADMIN Skip|{chat_id}"),  # style=ButtonStyle.PRIMARY
+            InlineKeyboardButton(text="▢", callback_data=f"ADMIN Stop|{chat_id}"),  # style=ButtonStyle.DANGER
         ],
     ]
     return buttons

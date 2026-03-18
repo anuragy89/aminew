@@ -1,5 +1,5 @@
 from pyrogram import filters
-from pyrogram.enums import ChatType, ButtonStyle
+from pyrogram.enums import ChatType  # ButtonStyle commented out temporarily
 from pyrogram.errors import MessageNotModified
 from pyrogram.types import (
     CallbackQuery,
@@ -338,7 +338,7 @@ async def authusers_mar(client, CallbackQuery, _):
                         InlineKeyboardButton(
                             text=_["CLOSE_BUTTON"],
                             callback_data=f"close",
-                            style=ButtonStyle.DANGER,
+                            # style=ButtonStyle.DANGER,
                         ),
                     ]
                 ]

@@ -1,5 +1,5 @@
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from pyrogram.enums import ButtonStyle
+# from pyrogram.enums import ButtonStyle  # TODO: re-enable when kurigram fixes icon_custom_emoji_id bug
 
 
 def stats_buttons(_, status):
@@ -26,7 +26,7 @@ def stats_buttons(_, status):
                 InlineKeyboardButton(
                     text=_["CLOSE_BUTTON"],
                     callback_data="close",
-                    style=ButtonStyle.DANGER,
+                    # style=ButtonStyle.DANGER,
                 ),
             ],
         ]
@@ -45,7 +45,7 @@ def back_stats_buttons(_):
                 InlineKeyboardButton(
                     text=_["CLOSE_BUTTON"],
                     callback_data="close",
-                    style=ButtonStyle.DANGER,
+                    # style=ButtonStyle.DANGER,
                 ),
             ],
         ]
