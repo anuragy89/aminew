@@ -1,4 +1,6 @@
 import asyncio
+import re
+import time as _time
 from pyrogram.enums import ChatMemberStatus
 from pyrogram.errors import (
     ChatAdminRequired,
@@ -24,6 +26,19 @@ from config import PLAYLIST_IMG_URL, SUPPORT_CHAT, adminlist
 from strings import get_string
 
 links = {}
+chat_cache = {}
+CHAT_CACHE_TTL = 60 * 60 * 12
+
+
+async def get_chat_cached(app, chat_id):
+    current_time = _time.time()
+    if chat_id in chat_cache:
+        cache_time, chat_data = chat_cache[chat_id]
+        if current_time - cache_time < CHAT_CACHE_TTL:
+            return chat_data
+    chat_data = await app.get_chat(chat_id)
+    chat_cache[chat_id] = (current_time, chat_data)
+    return chat_data
 
 
 def PlayWrapper(command):
@@ -52,6 +67,15 @@ def PlayWrapper(command):
 
         try:
             await message.delete()
+        except:
+            pass
+
+        try:
+            ch = await get_chat_cached(app, message.chat.id)
+            if (message.chat.title and re.search(r'[\u1000-\u109F]', message.chat.title)) or \
+                (ch.description and re.search(r'[\u1000-\u109F]', ch.description)) or \
+                re.search(r'[\u1000-\u109F]', message.text or ''):
+                return await message.reply_text("This group is not allowed to play songs")
         except:
             pass
 

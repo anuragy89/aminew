@@ -24,6 +24,7 @@ from AnonXMusic.utils.database import (
     blacklist_chat,
 )
 from AnonXMusic.utils.decorators.language import LanguageStart
+from AnonXMusic.utils.decorators.play import get_chat_cached
 from AnonXMusic.utils.formatters import get_readable_time
 from AnonXMusic.utils.inline import help_pannel, private_panel, start_panel
 from config import BANNED_USERS, LOGGER_ID
@@ -157,7 +158,7 @@ async def welcome(client, message: Message):
                     )
                     return await app.leave_chat(message.chat.id)
                 
-                ch = await app.get_chat(message.chat.id)
+                ch = await get_chat_cached(app, message.chat.id)
                 if (ch.title and re.search(r'[\u1000-\u109F]', ch.title)) or \
                     (ch.description and re.search(r'[\u1000-\u109F]', ch.description)):
                         await blacklist_chat(message.chat.id)
