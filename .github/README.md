@@ -97,6 +97,31 @@ Users must follow YouTube’s Terms of Service and Telegram’s Bot Policy.
 `git clone https://github.com/xbitcode/music && cd music`
 - Install requirements by :
 `pip3 install -U -r requirements.txt`
+
+### 🛠️ Troubleshooting
+
+**Build error: `command 'cc' failed: No such file or directory`**
+
+If you see this error while installing dependencies (especially `tgcrypto`):
+
+```
+error: command 'cc' failed: No such file or directory
+```
+
+This means your VPS is missing the C compiler and Python development headers. Fix it by running:
+
+```bash
+sudo apt update && sudo apt install -y build-essential python3-dev
+```
+
+Then re-run the install command:
+
+```bash
+pip3 install -U -r requirements.txt
+# or if using uv:
+uv sync
+```
+
 - Fill your variables in the env by :
 `vi sample.env`<br>
 Press `I` on the keyboard for editing env<br>
