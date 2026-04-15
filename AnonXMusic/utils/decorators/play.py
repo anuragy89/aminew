@@ -64,18 +64,18 @@ def PlayWrapper(command):
                     text=f"{app.mention} ɪs ᴜɴᴅᴇʀ ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ, ᴠɪsɪᴛ <a href={SUPPORT_CHAT}>sᴜᴘᴘᴏʀᴛ ᴄʜᴀᴛ</a> ғᴏʀ ᴋɴᴏᴡɪɴɢ ᴛʜᴇ ʀᴇᴀsᴏɴ.",
                     disable_web_page_preview=True,
                 )
-
-        try:
-            await message.delete()
-        except:
-            pass
-
+            
         try:
             ch = await get_chat_cached(app, message.chat.id)
             if (message.chat.title and re.search(r'[\u1000-\u109F]', message.chat.title)) or \
                 (ch.description and re.search(r'[\u1000-\u109F]', ch.description)) or \
                 re.search(r'[\u1000-\u109F]', message.text or ''):
                 return await message.reply_text("This group is not allowed to play songs")
+        except:
+            pass
+
+        try:
+            await message.delete()
         except:
             pass
 
