@@ -3,7 +3,9 @@ import re
 import time as _time
 from pyrogram.enums import ChatMemberStatus
 from pyrogram.errors import (
+    ChannelsTooMuch,
     ChatAdminRequired,
+    FloodWait,
     InviteRequestSent,
     UserAlreadyParticipant,
     UserNotParticipant,
@@ -13,13 +15,18 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from AnonXMusic import YouTube, app
 from AnonXMusic.misc import SUDOERS
 from AnonXMusic.utils.database import (
+    assistantdict,
+    evict_lru_for_assistant,
     get_assistant,
+    get_client,
     get_cmode,
     get_lang,
     get_playmode,
     get_playtype,
     is_active_chat,
     is_maintenance,
+    set_assistant_new,
+    touch_assistant_chat,
 )
 from AnonXMusic.utils.inline import botplaylist_markup
 from config import PLAYLIST_IMG_URL, SUPPORT_CHAT, adminlist
@@ -137,74 +144,162 @@ def PlayWrapper(command):
             fplay = None
 
         if not await is_active_chat(chat_id):
-            userbot = await get_assistant(chat_id)
-            try:
+            from AnonXMusic.core.userbot import assistants as _all_assistants
+
+            current_num = assistantdict.get(chat_id)
+            order = []
+            if current_num and current_num in _all_assistants:
+                order.append(current_num)
+            for n in _all_assistants:
+                if n not in order:
+                    order.append(n)
+
+            invitelink = None
+            if chat_id in links:
+                invitelink = links[chat_id]
+            elif message.chat.username:
+                invitelink = message.chat.username
+            else:
                 try:
-                    try:
-                        get = await app.get_chat_member(chat_id, int(userbot.id))
-                    except:
-                        get = await app.get_chat_member(chat_id, userbot.username)
+                    invitelink = await app.export_chat_invite_link(chat_id)
                 except ChatAdminRequired:
                     return await message.reply_text(_["call_1"])
-                if (
-                    get.status == ChatMemberStatus.BANNED
-                    or get.status == ChatMemberStatus.RESTRICTED
-                ):
-                    return await message.reply_text(
-                        _["call_2"].format(
-                            app.mention, userbot.id, userbot.name, userbot.username
-                        )
-                    )
-            except UserNotParticipant:
-                if chat_id in links:
-                    invitelink = links[chat_id]
-                else:
-                    if message.chat.username:
-                        invitelink = message.chat.username
-                        try:
-                            await userbot.resolve_peer(invitelink)
-                        except:
-                            pass
-                    else:
-                        try:
-                            invitelink = await app.export_chat_invite_link(chat_id)
-                        except ChatAdminRequired:
-                            return await message.reply_text(_["call_1"])
-                        except Exception as e:
-                            return await message.reply_text(
-                                _["call_3"].format(app.mention, type(e).__name__)
-                            )
-
-                if invitelink.startswith("https://t.me/+"):
-                    invitelink = invitelink.replace(
-                        "https://t.me/+", "https://t.me/joinchat/"
-                    )
-                myu = await message.reply_text(_["call_4"].format(app.mention))
-                try:
-                    await asyncio.sleep(1)
-                    await userbot.join_chat(invitelink)
-                except InviteRequestSent:
-                    try:
-                        await app.approve_chat_join_request(chat_id, userbot.id)
-                    except Exception as e:
-                        return await message.reply_text(
-                            _["call_3"].format(app.mention, type(e).__name__)
-                        )
-                    await asyncio.sleep(3)
-                    await myu.edit(_["call_5"].format(app.mention))
-                except UserAlreadyParticipant:
-                    pass
                 except Exception as e:
                     return await message.reply_text(
                         _["call_3"].format(app.mention, type(e).__name__)
                     )
+            if invitelink and invitelink.startswith("https://t.me/+"):
+                invitelink = invitelink.replace(
+                    "https://t.me/+", "https://t.me/joinchat/"
+                )
 
-                links[chat_id] = invitelink
+            userbot = None
+            joined_via_request = False
+            myu = None
+            last_err = None
+            admin_required = False
+
+            for assistant_num in order:
+                cand = await get_client(assistant_num)
+                if cand is None:
+                    continue
 
                 try:
-                    await userbot.resolve_peer(chat_id)
+                    try:
+                        get = await app.get_chat_member(chat_id, int(cand.id))
+                    except:
+                        get = await app.get_chat_member(chat_id, cand.username)
+                except ChatAdminRequired:
+                    admin_required = True
+                    continue
+                except UserNotParticipant:
+                    get = None
+                except Exception as e:
+                    last_err = e
+                    continue
+
+                if get is not None:
+                    if get.status in (
+                        ChatMemberStatus.BANNED,
+                        ChatMemberStatus.RESTRICTED,
+                    ):
+                        last_err = "banned"
+                        continue
+                    userbot = cand
+                    break
+
+                if not invitelink:
+                    last_err = "no_invite"
+                    continue
+
+                try:
+                    await cand.resolve_peer(
+                        invitelink if message.chat.username else chat_id
+                    )
                 except:
                     pass
+
+                if myu is None:
+                    myu = await message.reply_text(_["call_4"].format(app.mention))
+
+                joined = False
+                for attempt in range(2):
+                    try:
+                        await asyncio.sleep(1)
+                        await cand.join_chat(invitelink)
+                        joined = True
+                        break
+                    except InviteRequestSent:
+                        try:
+                            await app.approve_chat_join_request(chat_id, cand.id)
+                            joined_via_request = True
+                            joined = True
+                        except Exception as e:
+                            last_err = e
+                        break
+                    except UserAlreadyParticipant:
+                        joined = True
+                        break
+                    except ChannelsTooMuch as e:
+                        last_err = e
+                        if attempt == 0:
+                            await evict_lru_for_assistant(cand, assistant_num, batch=10)
+                            continue
+                        break
+                    except FloodWait as fw:
+                        last_err = fw
+                        try:
+                            await asyncio.sleep(int(getattr(fw, "value", 5)))
+                        except Exception:
+                            pass
+                        if attempt == 0:
+                            continue
+                        break
+                    except Exception as e:
+                        last_err = e
+                        break
+
+                if joined:
+                    userbot = cand
+                    break
+
+            if userbot is None:
+                if admin_required and last_err is None:
+                    return await message.reply_text(_["call_1"])
+                if last_err == "banned":
+                    bot = await get_client(order[0])
+                    return await message.reply_text(
+                        _["call_2"].format(
+                            app.mention, bot.id, bot.name, bot.username
+                        )
+                    )
+                err_name = (
+                    type(last_err).__name__ if isinstance(last_err, Exception)
+                    else "AssistantUnavailable"
+                )
+                return await message.reply_text(
+                    _["call_3"].format(app.mention, err_name)
+                )
+
+            if assistantdict.get(chat_id) != assistant_num:
+                assistantdict[chat_id] = assistant_num
+                await set_assistant_new(chat_id, assistant_num)
+                await touch_assistant_chat(assistant_num, chat_id)
+
+            if joined_via_request and myu is not None:
+                try:
+                    await asyncio.sleep(3)
+                    await myu.edit(_["call_5"].format(app.mention))
+                except Exception:
+                    pass
+
+            if invitelink:
+                links[chat_id] = invitelink
+
+            try:
+                await userbot.resolve_peer(chat_id)
+            except:
+                pass
         
         return await command(
             client,

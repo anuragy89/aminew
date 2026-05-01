@@ -1,4 +1,5 @@
 import random
+import time as _time
 from typing import Dict, List, Union
 
 from AnonXMusic import userbot
@@ -8,6 +9,7 @@ authdb = mongodb.adminauth
 authuserdb = mongodb.authuser
 autoenddb = mongodb.autoend
 assdb = mongodb.assistants
+asslrudb = mongodb.assistant_lru
 blacklist_chatdb = mongodb.blacklistChat
 blockeddb = mongodb.blockedusers
 chatsdb = mongodb.chats
@@ -24,8 +26,8 @@ usersdb = mongodb.tgusersdb
 modeldb = mongodb.model
 
 # Shifting to memory [mongo sucks often]
-active = []
-activevideo = []
+active = set()
+activevideo = set()
 assistantdict = {}
 autoend = {}
 count = {}
@@ -38,6 +40,22 @@ pause = {}
 playmode = {}
 playtype = {}
 skipmode = {}
+
+# Negative caches — avoid hitting Mongo on every membership check
+_autoend_cache = {"value": None}
+_gbanned_users = set()
+_gbanned_loaded = False
+_banned_users = set()
+_banned_loaded = False
+_served_chats = set()
+_served_chats_loaded = False
+_nonadmin_authset = set()
+_nonadmin_authloaded = False
+_onoff_cache = {}
+
+# LRU touch debounce — avoid one Mongo write per add/remove active
+_lru_touch_at: Dict[tuple, float] = {}
+LRU_TOUCH_DEBOUNCE_SEC = 300
 
 
 async def get_assistant_number(chat_id: int) -> str:
@@ -154,15 +172,12 @@ async def group_assistant(self, chat_id: int) -> int:
 
 
 async def is_skipmode(chat_id: int) -> bool:
-    mode = skipmode.get(chat_id)
-    if not mode:
-        user = await skipdb.find_one({"chat_id": chat_id})
-        if not user:
-            skipmode[chat_id] = True
-            return True
-        skipmode[chat_id] = False
-        return False
-    return mode
+    if chat_id in skipmode:
+        return skipmode[chat_id]
+    user = await skipdb.find_one({"chat_id": chat_id})
+    val = user is None
+    skipmode[chat_id] = val
+    return val
 
 
 async def skip_on(chat_id: int):
@@ -198,21 +213,24 @@ async def set_upvotes(chat_id: int, mode: int):
 
 
 async def is_autoend() -> bool:
-    chat_id = 1234
-    user = await autoenddb.find_one({"chat_id": chat_id})
-    if not user:
-        return False
-    return True
+    if _autoend_cache["value"] is not None:
+        return _autoend_cache["value"]
+    user = await autoenddb.find_one({"chat_id": 1234})
+    val = user is not None
+    _autoend_cache["value"] = val
+    return val
 
 
 async def autoend_on():
-    chat_id = 1234
-    await autoenddb.insert_one({"chat_id": chat_id})
+    _autoend_cache["value"] = True
+    await autoenddb.update_one(
+        {"chat_id": 1234}, {"$set": {"chat_id": 1234}}, upsert=True
+    )
 
 
 async def autoend_off():
-    chat_id = 1234
-    await autoenddb.delete_one({"chat_id": chat_id})
+    _autoend_cache["value"] = False
+    await autoenddb.delete_one({"chat_id": 1234})
 
 
 async def get_loop(chat_id: int) -> int:
@@ -315,52 +333,141 @@ async def music_off(chat_id: int):
 
 
 async def get_active_chats() -> list:
-    return active
+    return list(active)
 
 
 async def is_active_chat(chat_id: int) -> bool:
-    if chat_id not in active:
-        return False
-    else:
-        return True
+    return chat_id in active
 
 
 async def add_active_chat(chat_id: int):
-    if chat_id not in active:
-        active.append(chat_id)
+    active.add(chat_id)
+    assistant = assistantdict.get(chat_id)
+    if assistant:
+        await touch_assistant_chat(assistant, chat_id)
 
 
 async def remove_active_chat(chat_id: int):
-    if chat_id in active:
-        active.remove(chat_id)
+    active.discard(chat_id)
+    assistant = assistantdict.get(chat_id)
+    if assistant:
+        await touch_assistant_chat(assistant, chat_id)
+
+
+async def touch_assistant_chat(assistant: int, chat_id: int):
+    now = _time.time()
+    key = (int(assistant), chat_id)
+    last = _lru_touch_at.get(key, 0.0)
+    if now - last < LRU_TOUCH_DEBOUNCE_SEC:
+        return
+    _lru_touch_at[key] = now
+    try:
+        await asslrudb.update_one(
+            {"assistant": int(assistant), "chat_id": chat_id},
+            {"$set": {"last_used": now}},
+            upsert=True,
+        )
+    except Exception:
+        pass
+
+
+async def forget_assistant_chat(assistant: int, chat_id: int):
+    _lru_touch_at.pop((int(assistant), chat_id), None)
+    try:
+        await asslrudb.delete_one(
+            {"assistant": int(assistant), "chat_id": chat_id}
+        )
+    except Exception:
+        pass
+
+
+async def _bulk_forget_assistant_chats(assistant: int, chat_ids: List[int]):
+    if not chat_ids:
+        return
+    a = int(assistant)
+    for cid in chat_ids:
+        _lru_touch_at.pop((a, cid), None)
+    try:
+        await asslrudb.delete_many(
+            {"assistant": a, "chat_id": {"$in": list(chat_ids)}}
+        )
+    except Exception:
+        pass
+
+
+async def get_lru_chats(assistant: int, limit: int = 25) -> List[int]:
+    try:
+        cursor = asslrudb.find(
+            {"assistant": int(assistant)},
+            {"chat_id": 1, "_id": 0},
+        ).sort("last_used", 1).limit(limit)
+        return [doc["chat_id"] async for doc in cursor]
+    except Exception:
+        return []
+
+
+async def evict_lru_for_assistant(client, assistant: int, batch: int = 10) -> int:
+    from pyrogram.errors import FloodWait
+    import asyncio as _aio
+    import config as _cfg
+
+    chats = await get_lru_chats(assistant, limit=batch * 4)
+    evicted = 0
+    forget_ids: List[int] = []
+    logger_id = getattr(_cfg, "LOGGER_ID", None)
+    for cid in chats:
+        if cid in active or cid == logger_id:
+            continue
+        try:
+            await client.leave_chat(cid)
+            evicted += 1
+        except FloodWait as fw:
+            forget_ids.append(cid)
+            try:
+                await _aio.sleep(int(getattr(fw, "value", 5)))
+            except Exception:
+                pass
+            continue
+        except Exception:
+            pass
+        forget_ids.append(cid)
+        if evicted >= batch:
+            break
+    await _bulk_forget_assistant_chats(assistant, forget_ids)
+    return evicted
 
 
 async def get_active_video_chats() -> list:
-    return activevideo
+    return list(activevideo)
 
 
 async def is_active_video_chat(chat_id: int) -> bool:
-    if chat_id not in activevideo:
-        return False
-    else:
-        return True
+    return chat_id in activevideo
 
 
 async def add_active_video_chat(chat_id: int):
-    if chat_id not in activevideo:
-        activevideo.append(chat_id)
+    activevideo.add(chat_id)
 
 
 async def remove_active_video_chat(chat_id: int):
-    if chat_id in activevideo:
-        activevideo.remove(chat_id)
+    activevideo.discard(chat_id)
+
+
+async def _ensure_nonadmin_loaded():
+    global _nonadmin_authloaded
+    if _nonadmin_authloaded:
+        return
+    try:
+        async for doc in authdb.find({"chat_id": {"$lt": 0}}):
+            _nonadmin_authset.add(doc["chat_id"])
+    except Exception:
+        pass
+    _nonadmin_authloaded = True
 
 
 async def check_nonadmin_chat(chat_id: int) -> bool:
-    user = await authdb.find_one({"chat_id": chat_id})
-    if not user:
-        return False
-    return True
+    await _ensure_nonadmin_loaded()
+    return chat_id in _nonadmin_authset
 
 
 async def is_nonadmin_chat(chat_id: int) -> bool:
@@ -377,38 +484,44 @@ async def is_nonadmin_chat(chat_id: int) -> bool:
 
 async def add_nonadmin_chat(chat_id: int):
     nonadmin[chat_id] = True
-    is_admin = await check_nonadmin_chat(chat_id)
-    if is_admin:
+    await _ensure_nonadmin_loaded()
+    if chat_id in _nonadmin_authset:
         return
+    _nonadmin_authset.add(chat_id)
     return await authdb.insert_one({"chat_id": chat_id})
 
 
 async def remove_nonadmin_chat(chat_id: int):
     nonadmin[chat_id] = False
-    is_admin = await check_nonadmin_chat(chat_id)
-    if not is_admin:
+    await _ensure_nonadmin_loaded()
+    if chat_id not in _nonadmin_authset:
         return
+    _nonadmin_authset.discard(chat_id)
     return await authdb.delete_one({"chat_id": chat_id})
 
 
 async def is_on_off(on_off: int) -> bool:
+    if on_off in _onoff_cache:
+        return _onoff_cache[on_off]
     onoff = await onoffdb.find_one({"on_off": on_off})
-    if not onoff:
-        return False
-    return True
+    val = onoff is not None
+    _onoff_cache[on_off] = val
+    return val
 
 
 async def add_on(on_off: int):
-    is_on = await is_on_off(on_off)
-    if is_on:
+    if _onoff_cache.get(on_off):
         return
-    return await onoffdb.insert_one({"on_off": on_off})
+    _onoff_cache[on_off] = True
+    return await onoffdb.update_one(
+        {"on_off": on_off}, {"$set": {"on_off": on_off}}, upsert=True
+    )
 
 
 async def add_off(on_off: int):
-    is_off = await is_on_off(on_off)
-    if not is_off:
+    if _onoff_cache.get(on_off) is False:
         return
+    _onoff_cache[on_off] = False
     return await onoffdb.delete_one({"on_off": on_off})
 
 
@@ -476,17 +589,28 @@ async def get_served_chats() -> list:
     return chats_list
 
 
+async def _ensure_served_chats_loaded():
+    global _served_chats_loaded
+    if _served_chats_loaded:
+        return
+    try:
+        async for doc in chatsdb.find({"chat_id": {"$lt": 0}}, {"chat_id": 1, "_id": 0}):
+            _served_chats.add(doc["chat_id"])
+    except Exception:
+        pass
+    _served_chats_loaded = True
+
+
 async def is_served_chat(chat_id: int) -> bool:
-    chat = await chatsdb.find_one({"chat_id": chat_id})
-    if not chat:
-        return False
-    return True
+    await _ensure_served_chats_loaded()
+    return chat_id in _served_chats
 
 
 async def add_served_chat(chat_id: int):
-    is_served = await is_served_chat(chat_id)
-    if is_served:
+    await _ensure_served_chats_loaded()
+    if chat_id in _served_chats:
         return
+    _served_chats.add(chat_id)
     return await chatsdb.insert_one({"chat_id": chat_id})
 
 
@@ -566,24 +690,36 @@ async def get_gbanned() -> list:
     return results
 
 
+async def _ensure_gbanned_loaded():
+    global _gbanned_loaded
+    if _gbanned_loaded:
+        return
+    try:
+        async for doc in gbansdb.find({"user_id": {"$gt": 0}}, {"user_id": 1, "_id": 0}):
+            _gbanned_users.add(doc["user_id"])
+    except Exception:
+        pass
+    _gbanned_loaded = True
+
+
 async def is_gbanned_user(user_id: int) -> bool:
-    user = await gbansdb.find_one({"user_id": user_id})
-    if not user:
-        return False
-    return True
+    await _ensure_gbanned_loaded()
+    return user_id in _gbanned_users
 
 
 async def add_gban_user(user_id: int):
-    is_gbanned = await is_gbanned_user(user_id)
-    if is_gbanned:
+    await _ensure_gbanned_loaded()
+    if user_id in _gbanned_users:
         return
+    _gbanned_users.add(user_id)
     return await gbansdb.insert_one({"user_id": user_id})
 
 
 async def remove_gban_user(user_id: int):
-    is_gbanned = await is_gbanned_user(user_id)
-    if not is_gbanned:
+    await _ensure_gbanned_loaded()
+    if user_id not in _gbanned_users:
         return
+    _gbanned_users.discard(user_id)
     return await gbansdb.delete_one({"user_id": user_id})
 
 
@@ -626,24 +762,36 @@ async def get_banned_count() -> int:
     return len(users)
 
 
+async def _ensure_banned_loaded():
+    global _banned_loaded
+    if _banned_loaded:
+        return
+    try:
+        async for doc in blockeddb.find({"user_id": {"$gt": 0}}, {"user_id": 1, "_id": 0}):
+            _banned_users.add(doc["user_id"])
+    except Exception:
+        pass
+    _banned_loaded = True
+
+
 async def is_banned_user(user_id: int) -> bool:
-    user = await blockeddb.find_one({"user_id": user_id})
-    if not user:
-        return False
-    return True
+    await _ensure_banned_loaded()
+    return user_id in _banned_users
 
 
 async def add_banned_user(user_id: int):
-    is_gbanned = await is_banned_user(user_id)
-    if is_gbanned:
+    await _ensure_banned_loaded()
+    if user_id in _banned_users:
         return
+    _banned_users.add(user_id)
     return await blockeddb.insert_one({"user_id": user_id})
 
 
 async def remove_banned_user(user_id: int):
-    is_gbanned = await is_banned_user(user_id)
-    if not is_gbanned:
+    await _ensure_banned_loaded()
+    if user_id not in _banned_users:
         return
+    _banned_users.discard(user_id)
     return await blockeddb.delete_one({"user_id": user_id})
 
 

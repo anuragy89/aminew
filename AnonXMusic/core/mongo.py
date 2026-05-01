@@ -12,3 +12,12 @@ try:
 except:
     LOGGER(__name__).error("Failed to connect to your Mongo Database.")
     exit()
+
+
+async def ensure_indexes():
+    try:
+        await mongodb.assistant_lru.create_index(
+            [("assistant", 1), ("last_used", 1)], background=True
+        )
+    except Exception:
+        pass

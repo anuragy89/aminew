@@ -9,6 +9,7 @@ from AnonXMusic import LOGGER, app, userbot
 from AnonXMusic.core.call import Anony
 from AnonXMusic.misc import sudo
 from AnonXMusic.plugins import ALL_MODULES
+from AnonXMusic.core.mongo import ensure_indexes
 from AnonXMusic.utils.database import get_banned_users, get_gbanned
 from config import BANNED_USERS
 
@@ -22,6 +23,7 @@ async def init():
     ):
         LOGGER(__name__).error("Assistant client variables not defined, exiting...")
         exit()
+    await ensure_indexes()
     await sudo()
     try:
         users = await get_gbanned()
