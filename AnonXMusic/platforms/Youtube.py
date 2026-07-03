@@ -64,15 +64,42 @@ class YouTubeAPI:
         logger.info("YouTube API config validated successfully")
     
     @classmethod
-    def _get_headers(cls):
-        """Get API headers (created once and reused)"""
+    def _get_headers(cls, cookie=None):
+        """Get API headers (created once and reused).
+
+        If `cookie` is given (the affinity cookie issued by the router on /info), attach
+        it so the /stream + chunk requests are routed to the dyno that extracted the URL
+        (the googlevideo URL is bound to that dyno's egress IP — a mismatch is a 403/410).
+        """
         if cls._api_headers is None:
             cls._api_headers = {
                 "x-api-key": f"{YT_API_KEY}",
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }
+        if cookie:
+            # Return a fresh dict so we never mutate the shared cached headers.
+            return {**cls._api_headers, "Cookie": cookie}
         return cls._api_headers
-    
+
+    @staticmethod
+    def _extract_affinity_cookie(response):
+        """Pull the Heroku affinity cookie the router issued for this video.
+
+        The router exposes it directly as `X-Affinity-Cookie: name=value` for non-browser
+        clients; we fall back to parsing Set-Cookie. Attaching it to the download requests
+        pins them to the extractor dyno, avoiding the egress-IP-mismatch 403/410.
+        """
+        cookie = response.headers.get("X-Affinity-Cookie")
+        if cookie:
+            return cookie
+        try:
+            for name, value in response.cookies.items():
+                if "affinity" in name.lower():
+                    return f"{name}={value}"
+        except Exception:
+            pass
+        return None
+
     @classmethod
     def _get_session(cls):
         """Get reusable requests session with retry logic"""
@@ -167,40 +194,57 @@ class YouTubeAPI:
             return await self._download_single(url, filepath, headers)
     
     async def _fetch_media_url(self, vid_id, media_type='audio'):
-        """Fetch audio/video URL from API (unified method)"""
+        """Fetch audio/video URL from API (unified method).
+
+        Returns (url, cookie): the media URL and the affinity cookie to attach to the
+        follow-up /stream requests (None if the API didn't issue one / on failure).
+        """
         try:
             session = self._get_session()
             response = session.get(f"{YTPROXY}/info/{vid_id}", headers=self._get_headers(), timeout=60)
             data = response.json()
-            
+
             if data.get('status') == 'success':
-                return data.get(f'{media_type}_url')
+                return data.get(f'{media_type}_url'), self._extract_affinity_cookie(response)
             elif data.get('status') == 'error':
                 logger.error(f"API Error: {data.get('message', 'Unknown error from API.')}")
             else:
                 logger.error("Could not fetch Backend\nPlease contact API provider.")
-            return None
-            
+            return None, None
+
         except requests.exceptions.RequestException as e:
             logger.error(f"Network error while fetching {media_type} info: {str(e)}")
         except json.JSONDecodeError as e:
             logger.error(f"Invalid response from proxy: {str(e)}")
         except Exception as e:
             logger.error(f"Error fetching {media_type} URL: {str(e)}")
-        return None
-    
+        return None, None
+
     async def _download_media(self, vid_id, filepath, media_type='audio'):
         """Unified download method for audio/video"""
         if os.path.exists(filepath):
             return filepath
-        
-        media_url = await self._fetch_media_url(vid_id, media_type)
+
+        media_url, cookie = await self._fetch_media_url(vid_id, media_type)
         if not media_url:
             return None
         elif STREAMING:
+            # Direct-stream mode: py-tgcalls/ffmpeg fetches the URL itself, so the affinity
+            # cookie isn't attached here (see README for the ffmpeg-header follow-up).
             return media_url
-        
-        return await self._download_parallel(media_url, filepath, self._get_headers())
+
+        result = await self._download_parallel(media_url, filepath, self._get_headers(cookie))
+        if result:
+            return result
+
+        # The URL likely died mid-download (expired, or googlevideo 403/410 from an
+        # egress-IP mismatch). Re-fetch /info once — the router re-steers to a dyno whose
+        # IP matches and issues a fresh affinity cookie — then retry the download.
+        logger.warning(f"Download failed for {vid_id} ({media_type}); re-fetching URL and retrying once")
+        media_url, cookie = await self._fetch_media_url(vid_id, media_type)
+        if not media_url:
+            return None
+        return await self._download_parallel(media_url, filepath, self._get_headers(cookie))
         
 
 

@@ -298,6 +298,11 @@ class Call(PyTgCalls):
         assistant = await group_assistant(self, chat_id)
         language = await get_lang(chat_id)
         _ = get_string(language)
+        if not link:
+            # download()/extraction returned no path or URL. Raise the handled AssistantErr
+            # so the user sees a clean message instead of MediaStream(None) -> TypeError
+            # bubbling up as "something went wrong ... Exception: TypeError".
+            raise AssistantErr(_["play_14"])
         if video:
             stream= MediaStream(
                 link,
@@ -423,6 +428,12 @@ class Call(PyTgCalls):
                         video=True if str(streamtype) == "video" else False,
                     )
                 except:
+                    return await mystic.edit_text(
+                        _["call_6"], disable_web_page_preview=True
+                    )
+                if not file_path:
+                    # download() returned None (failed without raising) -> guard against
+                    # MediaStream(None) TypeError; surface the clean failure message.
                     return await mystic.edit_text(
                         _["call_6"], disable_web_page_preview=True
                     )

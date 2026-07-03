@@ -87,6 +87,9 @@ async def stream(
                     )
                 except:
                     raise AssistantErr(_["play_14"])
+                if not file_path:
+                    # Failed download without raising -> don't queue/stream a None path.
+                    raise AssistantErr(_["play_14"])
                 await Anony.join_call(
                     chat_id,
                     original_chat_id,
@@ -151,6 +154,10 @@ async def stream(
                 vidid, mystic, videoid=True, video=status
             )
         except:
+            raise AssistantErr(_["play_14"])
+        if not file_path:
+            # download() returned None (API/extraction failed without raising). Stop here
+            # so we never queue a None "file" or pass it to MediaStream (-> TypeError).
             raise AssistantErr(_["play_14"])
         if await is_active_chat(chat_id):
             await put_queue(
