@@ -2,15 +2,17 @@ from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, Message
 
 import config
-from AnonXMusic import YouTube, app
+from AnonXMusic import LOGGER, YouTube, app
 from AnonXMusic.core.call import Anony
 from AnonXMusic.misc import db
-from AnonXMusic.utils.database import get_loop
+from AnonXMusic.utils.database import get_loop, is_autoplay
 from AnonXMusic.utils.decorators import AdminRightsCheck
 from AnonXMusic.utils.inline import close_markup, stream_markup
 from AnonXMusic.utils.stream.autoclear import auto_clean
 from AnonXMusic.utils.thumbnails import get_thumb
 from config import BANNED_USERS
+
+logger = LOGGER(__name__)
 
 
 @app.on_message(
@@ -40,17 +42,21 @@ async def skip(cli, message: Message, _, chat_id):
                             if popped:
                                 await auto_clean(popped)
                             if not check:
-                                try:
-                                    await message.reply_text(
-                                        text=_["admin_6"].format(
-                                            message.from_user.mention,
-                                            message.chat.title,
-                                        ),
-                                        reply_markup=close_markup(_),
-                                    )
-                                    await Anony.stop_stream(chat_id)
-                                except:
-                                    return
+                                refilled = False
+                                if popped and await is_autoplay(chat_id):
+                                    refilled = await Anony.fetch_and_queue_related(chat_id, popped)
+                                if not refilled:
+                                    try:
+                                        await message.reply_text(
+                                            text=_["admin_6"].format(
+                                                message.from_user.mention,
+                                                message.chat.title,
+                                            ),
+                                            reply_markup=close_markup(_),
+                                        )
+                                        await Anony.stop_stream(chat_id)
+                                    except:
+                                        return
                                 break
                     else:
                         return await message.reply_text(_["admin_11"].format(count))
@@ -68,16 +74,20 @@ async def skip(cli, message: Message, _, chat_id):
             if popped:
                 await auto_clean(popped)
             if not check:
-                await message.reply_text(
-                    text=_["admin_6"].format(
-                        message.from_user.mention, message.chat.title
-                    ),
-                    reply_markup=close_markup(_),
-                )
-                try:
-                    return await Anony.stop_stream(chat_id)
-                except:
-                    return
+                refilled = False
+                if popped and await is_autoplay(chat_id):
+                    refilled = await Anony.fetch_and_queue_related(chat_id, popped)
+                if not refilled:
+                    await message.reply_text(
+                        text=_["admin_6"].format(
+                            message.from_user.mention, message.chat.title
+                        ),
+                        reply_markup=close_markup(_),
+                    )
+                    try:
+                        return await Anony.stop_stream(chat_id)
+                    except:
+                        return
         except:
             try:
                 await message.reply_text(
@@ -117,7 +127,7 @@ async def skip(cli, message: Message, _, chat_id):
             await Anony.skip_stream(chat_id, link, video=status, image=image)
         except:
             return await message.reply_text(_["call_6"])
-        button = stream_markup(_, chat_id)
+        button = await stream_markup(_, chat_id)
         img = await get_thumb(videoid, user_id, title=title, duration=duration, thumbnail=thumbnail)
         run = await message.reply_photo(
             photo=img,
@@ -140,7 +150,11 @@ async def skip(cli, message: Message, _, chat_id):
                 videoid=True,
                 video=status,
             )
-        except:
+        except Exception as e:
+            logger.error(f"skip (vid_) download failed for {chat_id}, videoid={videoid}: {e}")
+            return await mystic.edit_text(_["call_6"])
+        if not file_path:
+            logger.error(f"skip (vid_) download returned no file for {chat_id}, videoid={videoid}")
             return await mystic.edit_text(_["call_6"])
         try:
             image = await YouTube.thumbnail(videoid, True)
@@ -148,9 +162,10 @@ async def skip(cli, message: Message, _, chat_id):
             image = None
         try:
             await Anony.skip_stream(chat_id, file_path, video=status, image=image)
-        except:
+        except Exception as e:
+            logger.error(f"skip (vid_) play failed for {chat_id}, videoid={videoid}, file={file_path}: {e}")
             return await mystic.edit_text(_["call_6"])
-        button = stream_markup(_, chat_id)
+        button = await stream_markup(_, chat_id)
         img = await get_thumb(videoid, user_id, title=title, duration=duration, thumbnail=thumbnail)
         run = await message.reply_photo(
             photo=img,
@@ -170,7 +185,7 @@ async def skip(cli, message: Message, _, chat_id):
             await Anony.skip_stream(chat_id, videoid, video=status)
         except:
             return await message.reply_text(_["call_6"])
-        button = stream_markup(_, chat_id)
+        button = await stream_markup(_, chat_id)
         run = await message.reply_photo(
             photo=config.STREAM_IMG_URL,
             caption=_["stream_2"].format(user),
@@ -193,7 +208,7 @@ async def skip(cli, message: Message, _, chat_id):
         except:
             return await message.reply_text(_["call_6"])
         if videoid == "telegram":
-            button = stream_markup(_, chat_id)
+            button = await stream_markup(_, chat_id)
             run = await message.reply_photo(
                 photo=config.TELEGRAM_AUDIO_URL
                 if str(streamtype) == "audio"
@@ -206,7 +221,7 @@ async def skip(cli, message: Message, _, chat_id):
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
         elif videoid == "soundcloud":
-            button = stream_markup(_, chat_id)
+            button = await stream_markup(_, chat_id)
             run = await message.reply_photo(
                 photo=config.SOUNCLOUD_IMG_URL
                 if str(streamtype) == "audio"
@@ -219,7 +234,7 @@ async def skip(cli, message: Message, _, chat_id):
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
         else:
-            button = stream_markup(_, chat_id)
+            button = await stream_markup(_, chat_id)
             img = await get_thumb(videoid, user_id, title=title, duration=duration, thumbnail=thumbnail)
             run = await message.reply_photo(
                 photo=img,
@@ -233,3 +248,4 @@ async def skip(cli, message: Message, _, chat_id):
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "stream"
+    await Anony.ensure_autoplay_queued(chat_id)

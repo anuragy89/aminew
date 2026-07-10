@@ -14,9 +14,10 @@ from pyrogram.types import Message
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from ytSearch import VideosSearch, Playlist
+from ytSearch.suggestions import VideoSuggestions
 from AnonXMusic import LOGGER
 from AnonXMusic.utils.formatters import time_to_seconds
-from config import STREAMING, YT_API_KEY, YTPROXY_URL as YTPROXY
+from config import DURATION_LIMIT, STREAMING, YT_API_KEY, YTPROXY_URL as YTPROXY
 
 logger = LOGGER(__name__)
 
@@ -534,6 +535,40 @@ class YouTubeAPI:
             "thumb": thumbnail,
         }
         return track_details, vidid
+
+    async def related(self, vidid: str, exclude: list = None):
+        # A suggestion should be one song, not a multi-hour mix/compilation - those are
+        # far more likely to time out mid-download (the downloader's per-connection
+        # timeouts are minutes, not hours) and silently leave nothing playable queued.
+        # Cap well below the generous playlist-import DURATION_LIMIT (~5h).
+        autoplay_duration_limit = min(DURATION_LIMIT, 1200)
+        exclude = set(exclude or [])
+        try:
+            suggestions = VideoSuggestions(vidid, limit=8)
+            results = (await suggestions.next())["result"]
+        except Exception:
+            return None
+        for result in results:
+            if result.get("type") != "video":
+                continue
+            rid = result.get("id")
+            if not rid or rid in exclude:
+                continue
+            duration_min = result.get("duration")
+            try:
+                duration_sec = int(time_to_seconds(duration_min)) if duration_min else None
+            except Exception:
+                duration_sec = None
+            if not duration_sec or duration_sec > autoplay_duration_limit:
+                continue
+            thumbnails = result.get("thumbnails") or [{}]
+            return {
+                "vidid": rid,
+                "title": result.get("title") or "Unknown",
+                "duration_min": duration_min,
+                "thumbnail": (thumbnails[0].get("url") or "").split("?")[0],
+            }
+        return None
 
     async def formats(self, link: str, videoid: Union[bool, str] = None):
         if videoid:

@@ -3,14 +3,17 @@ import asyncio
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup,CallbackQuery
 
-from AnonXMusic import YouTube, app
-from AnonXMusic.core.call import Anony
+from AnonXMusic import LOGGER, YouTube, app
+from AnonXMusic.core.call import Anony, cancel_autoplay_idle
 from AnonXMusic.misc import SUDOERS, db
 from AnonXMusic.utils.database import (
+    autoplay_off,
+    autoplay_on,
     get_active_chats,
     get_lang,
     get_upvote_count,
     is_active_chat,
+    is_autoplay,
     is_music_playing,
     is_nonadmin_chat,
     music_off,
@@ -35,6 +38,8 @@ from config import (
 )
 from strings import get_string
 
+logger = LOGGER(__name__)
+
 checker = {}
 upvoters = {}
 
@@ -52,6 +57,8 @@ async def del_back_playlist(client, CallbackQuery:CallbackQuery, _):
     chat_id = int(chat)
     if not await is_active_chat(chat_id):
         return await CallbackQuery.answer(_["general_5"], show_alert=True)
+    if await is_autoplay(chat_id):
+        await Anony.schedule_autoplay_idle(chat_id)
     mention = CallbackQuery.from_user.mention
     if command == "UpVote":
         if chat_id not in votemode:
@@ -149,6 +156,22 @@ async def del_back_playlist(client, CallbackQuery:CallbackQuery, _):
         await CallbackQuery.message.reply_text(
             _["admin_4"].format(mention), reply_markup=close_markup(_)
         )
+    elif command == "Autoplay":
+        if await is_autoplay(chat_id):
+            await autoplay_off(chat_id)
+            await cancel_autoplay_idle(chat_id)
+            await CallbackQuery.answer(_["admin_42"])
+        else:
+            await autoplay_on(chat_id)
+            await Anony.schedule_autoplay_idle(chat_id)
+            await CallbackQuery.answer(_["admin_41"])
+            await Anony.ensure_autoplay_queued(chat_id)
+        try:
+            await CallbackQuery.edit_message_reply_markup(
+                reply_markup=InlineKeyboardMarkup(await stream_markup(_, chat_id))
+            )
+        except:
+            pass
     elif command == "Stop" or command == "End":
         await CallbackQuery.answer()
         await Anony.stop_stream(chat_id)
@@ -167,19 +190,23 @@ async def del_back_playlist(client, CallbackQuery:CallbackQuery, _):
                 if popped:
                     await auto_clean(popped)
                 if not check:
-                    await CallbackQuery.edit_message_text(
-                        f"➻ sᴛʀᴇᴀᴍ sᴋɪᴩᴩᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
-                    )
-                    await CallbackQuery.message.reply_text(
-                        text=_["admin_6"].format(
-                            mention, CallbackQuery.message.chat.title
-                        ),
-                        reply_markup=close_markup(_),
-                    )
-                    try:
-                        return await Anony.stop_stream(chat_id)
-                    except:
-                        return
+                    refilled = False
+                    if popped and await is_autoplay(chat_id):
+                        refilled = await Anony.fetch_and_queue_related(chat_id, popped)
+                    if not refilled:
+                        await CallbackQuery.edit_message_text(
+                            f"➻ sᴛʀᴇᴀᴍ sᴋɪᴩᴩᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
+                        )
+                        await CallbackQuery.message.reply_text(
+                            text=_["admin_6"].format(
+                                mention, CallbackQuery.message.chat.title
+                            ),
+                            reply_markup=close_markup(_),
+                        )
+                        try:
+                            return await Anony.stop_stream(chat_id)
+                        except:
+                            return
             except:
                 try:
                     await CallbackQuery.edit_message_text(
@@ -228,7 +255,7 @@ async def del_back_playlist(client, CallbackQuery:CallbackQuery, _):
                 await Anony.skip_stream(chat_id, link, video=status, image=image)
             except:
                 return await CallbackQuery.message.reply_text(_["call_6"])
-            button = stream_markup(_, chat_id)
+            button = await stream_markup(_, chat_id)
             img = await get_thumb(videoid, user_id, title=title, duration=duration, thumbnail=thumbnail)
             run = await CallbackQuery.message.reply_photo(
                 photo=img,
@@ -254,7 +281,11 @@ async def del_back_playlist(client, CallbackQuery:CallbackQuery, _):
                     videoid=True,
                     video=status,
                 )
-            except:
+            except Exception as e:
+                logger.error(f"Skip/Replay (vid_) download failed for {chat_id}, videoid={videoid}: {e}")
+                return await mystic.edit_text(_["call_6"])
+            if not file_path:
+                logger.error(f"Skip/Replay (vid_) download returned no file for {chat_id}, videoid={videoid}")
                 return await mystic.edit_text(_["call_6"])
             try:
                 image = await YouTube.thumbnail(videoid, True)
@@ -262,9 +293,10 @@ async def del_back_playlist(client, CallbackQuery:CallbackQuery, _):
                 image = None
             try:
                 await Anony.skip_stream(chat_id, file_path, video=status, image=image)
-            except:
+            except Exception as e:
+                logger.error(f"Skip/Replay (vid_) play failed for {chat_id}, videoid={videoid}, file={file_path}: {e}")
                 return await mystic.edit_text(_["call_6"])
-            button = stream_markup(_, chat_id)
+            button = await stream_markup(_, chat_id)
             img = await get_thumb(videoid, user_id, title=title, duration=duration, thumbnail=thumbnail)
             run = await CallbackQuery.message.reply_photo(
                 photo=img,
@@ -285,7 +317,7 @@ async def del_back_playlist(client, CallbackQuery:CallbackQuery, _):
                 await Anony.skip_stream(chat_id, videoid, video=status)
             except:
                 return await CallbackQuery.message.reply_text(_["call_6"])
-            button = stream_markup(_, chat_id)
+            button = await stream_markup(_, chat_id)
             run = await CallbackQuery.message.reply_photo(
                 photo=STREAM_IMG_URL,
                 caption=_["stream_2"].format(user),
@@ -309,7 +341,7 @@ async def del_back_playlist(client, CallbackQuery:CallbackQuery, _):
             except:
                 return await CallbackQuery.message.reply_text(_["call_6"])
             if videoid == "telegram":
-                button = stream_markup(_, chat_id)
+                button = await stream_markup(_, chat_id)
                 run = await CallbackQuery.message.reply_photo(
                     photo=TELEGRAM_AUDIO_URL
                     if str(streamtype) == "audio"
@@ -322,7 +354,7 @@ async def del_back_playlist(client, CallbackQuery:CallbackQuery, _):
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "tg"
             elif videoid == "soundcloud":
-                button = stream_markup(_, chat_id)
+                button = await stream_markup(_, chat_id)
                 run = await CallbackQuery.message.reply_photo(
                     photo=SOUNCLOUD_IMG_URL
                     if str(streamtype) == "audio"
@@ -335,7 +367,7 @@ async def del_back_playlist(client, CallbackQuery:CallbackQuery, _):
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "tg"
             else:
-                button = stream_markup(_, chat_id)
+                button = await stream_markup(_, chat_id)
                 img = await get_thumb(videoid, user_id, title=title, duration=duration, thumbnail=thumbnail)
                 run = await CallbackQuery.message.reply_photo(
                     photo=img,
@@ -350,6 +382,7 @@ async def del_back_playlist(client, CallbackQuery:CallbackQuery, _):
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "stream"
             await CallbackQuery.edit_message_text(txt, reply_markup=close_markup(_))
+        await Anony.ensure_autoplay_queued(chat_id)
 
 
 async def markup_timer():
@@ -381,7 +414,7 @@ async def markup_timer():
                 except:
                     _ = get_string("en")
                 try:
-                    buttons = stream_markup_timer(
+                    buttons = await stream_markup_timer(
                         _,
                         chat_id,
                         seconds_to_min(playing[0]["played"]),

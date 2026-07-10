@@ -30,6 +30,7 @@ active = set()
 activevideo = set()
 assistantdict = {}
 autoend = {}
+autoplay = {}
 count = {}
 channelconnect = {}
 langm = {}
@@ -242,6 +243,18 @@ async def get_loop(chat_id: int) -> int:
 
 async def set_loop(chat_id: int, mode: int):
     loop[chat_id] = mode
+
+
+async def is_autoplay(chat_id: int) -> bool:
+    return autoplay.get(chat_id, False)
+
+
+async def autoplay_on(chat_id: int):
+    autoplay[chat_id] = True
+
+
+async def autoplay_off(chat_id: int):
+    autoplay[chat_id] = False
 
 
 async def get_cmode(chat_id: int) -> int:

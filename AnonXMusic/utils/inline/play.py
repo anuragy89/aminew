@@ -2,6 +2,7 @@ import math
 
 from pyrogram.types import InlineKeyboardButton
 # from pyrogram.enums import ButtonStyle  # TODO: re-enable when kurigram fixes icon_custom_emoji_id bug
+from AnonXMusic.utils.database import is_autoplay
 from AnonXMusic.utils.formatters import time_to_seconds
 
 
@@ -28,7 +29,7 @@ def track_markup(_, videoid, user_id, channel, fplay):
     return buttons
 
 
-def stream_markup_timer(_, chat_id, played, dur):
+async def stream_markup_timer(_, chat_id, played, dur):
     played_sec = time_to_seconds(played)
     duration_sec = time_to_seconds(dur)
     percentage = (played_sec / duration_sec) * 100
@@ -53,6 +54,7 @@ def stream_markup_timer(_, chat_id, played, dur):
         bar = "————————◉—"
     else:
         bar = "—————————◉"
+    autoplay_state = await is_autoplay(chat_id)
     buttons = [
         [
             InlineKeyboardButton(
@@ -60,7 +62,13 @@ def stream_markup_timer(_, chat_id, played, dur):
                 callback_data="GetTimer",
             )
         ],
-        [   
+        [
+            InlineKeyboardButton(
+                text="🔁 Autoplay: ON" if autoplay_state else "🔁 Autoplay: OFF",
+                callback_data=f"ADMIN Autoplay|{chat_id}",
+            ),
+        ],
+        [
             InlineKeyboardButton(text="▷", callback_data=f"ADMIN Resume|{chat_id}"),  # style=ButtonStyle.PRIMARY
             InlineKeyboardButton(text="II", callback_data=f"ADMIN Pause|{chat_id}"),  # style=ButtonStyle.PRIMARY
             InlineKeyboardButton(text="↻", callback_data=f"ADMIN Replay|{chat_id}"),  # style=ButtonStyle.PRIMARY
@@ -68,12 +76,19 @@ def stream_markup_timer(_, chat_id, played, dur):
             InlineKeyboardButton(text="▢", callback_data=f"ADMIN Stop|{chat_id}"),  # style=ButtonStyle.DANGER
         ],
     ]
-    
+
     return buttons
 
 
-def stream_markup(_, chat_id):
+async def stream_markup(_, chat_id):
+    autoplay_state = await is_autoplay(chat_id)
     buttons = [
+        [
+            InlineKeyboardButton(
+                text="🔁 Autoplay: ON" if autoplay_state else "🔁 Autoplay: OFF",
+                callback_data=f"ADMIN Autoplay|{chat_id}",
+            ),
+        ],
         [
             InlineKeyboardButton(text="▷", callback_data=f"ADMIN Resume|{chat_id}"),  # style=ButtonStyle.PRIMARY
             InlineKeyboardButton(text="II", callback_data=f"ADMIN Pause|{chat_id}"),  # style=ButtonStyle.PRIMARY

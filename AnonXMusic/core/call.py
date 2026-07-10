@@ -2,6 +2,7 @@ import asyncio
 import os
 from datetime import datetime, timedelta
 from typing import Union
+from urllib.parse import urlparse, urlunparse
 
 from pyrogram import Client
 from pyrogram.types import InlineKeyboardMarkup
@@ -23,10 +24,12 @@ from AnonXMusic.misc import db
 from AnonXMusic.utils.database import (
     add_active_chat,
     add_active_video_chat,
+    autoplay_off,
     get_lang,
     get_loop,
     group_assistant,
     is_autoend,
+    is_autoplay,
     is_active_chat,
     music_on,
     remove_active_chat,
@@ -38,6 +41,7 @@ from AnonXMusic.utils.formatters import check_duration, seconds_to_min, speed_co
 from AnonXMusic.utils.inline.play import stream_markup
 from AnonXMusic.utils.thumbnails import get_thumb
 from AnonXMusic.utils.stream.autoclear import auto_clean, clear_queue_files
+from AnonXMusic.utils.stream.queue import put_queue
 from strings import get_string
 
 logger = LOGGER(__name__)
@@ -47,12 +51,26 @@ autoend_tasks = {}
 counter = {}
 AUTO_END_TIME = 0.5
 
+autoplay_tasks = {}
+autoplay_history = {}
+AUTOPLAY_IDLE_MINUTES = 60
+
+
+async def cancel_autoplay_idle(chat_id):
+    task = autoplay_tasks.pop(chat_id, None)
+    if task:
+        task.cancel()
+
+
 async def _clear_(chat_id):
     queue = db.get(chat_id, [])
     await clear_queue_files(chat_id, queue)
     db[chat_id] = []
     await remove_active_video_chat(chat_id)
     await remove_active_chat(chat_id)
+    await autoplay_off(chat_id)
+    autoplay_history.pop(chat_id, None)
+    await cancel_autoplay_idle(chat_id)
 
 
 class Call(PyTgCalls):
@@ -250,18 +268,24 @@ class Call(PyTgCalls):
         image: Union[bool, str] = None,
     ):
         assistant = await group_assistant(self, chat_id)
-        if video:
-            stream = MediaStream(
-                link,
-                audio_parameters=AudioQuality.HIGH,
-                video_parameters=VideoQuality.SD_480p,
-            )
-        else:
-            stream = MediaStream(link, audio_parameters=AudioQuality.HIGH,video_flags=MediaStream.Flags.IGNORE)
-        await assistant.play(
-            chat_id,
-            stream,
-        )
+        def _build_stream():
+            if video:
+                return MediaStream(
+                    link,
+                    audio_parameters=AudioQuality.HIGH,
+                    video_parameters=VideoQuality.SD_480p,
+                )
+            return MediaStream(link, audio_parameters=AudioQuality.HIGH, video_flags=MediaStream.Flags.IGNORE)
+        for attempt in range(2):
+            try:
+                await assistant.play(chat_id, _build_stream())
+                return
+            except (NoAudioSourceFound, NoVideoSourceFound) as e:
+                logger.error(f"skip_stream source check failed for {chat_id} (attempt {attempt + 1}): {e}")
+                if attempt == 1:
+                    raise
+                link = self._redirect_googlevideo_host(link)
+                await asyncio.sleep(1)
 
     async def seek_stream(self, chat_id, file_path, to_seek, duration, mode):
         assistant = await group_assistant(self, chat_id)
@@ -327,6 +351,7 @@ class Call(PyTgCalls):
                 logger.error(f"MediaStream source check failed for {chat_id} (attempt {attempt + 1}): {e}")
                 if attempt == 1:
                     raise AssistantErr(_["play_14"])
+                link = self._redirect_googlevideo_host(link)
                 await asyncio.sleep(1)
             except NoActiveGroupCall:
                 raise AssistantErr(_["call_8"])
@@ -342,6 +367,18 @@ class Call(PyTgCalls):
             if users == 1:
                 await self._schedule_autoend(chat_id, 1)
 
+    @staticmethod
+    def _redirect_googlevideo_host(link: str) -> str:
+        # googlevideo edge servers occasionally reject a fetch from a given egress IP;
+        # redirector.googlevideo.com auto-picks a working edge on retry. No-op for
+        # anything that isn't a URL (e.g. a local downloaded file path).
+        if not link or "://" not in link:
+            return link
+        parsed = urlparse(link)
+        if not parsed.netloc:
+            return link
+        return urlunparse(parsed._replace(netloc="redirector.googlevideo.com"))
+
     async def change_stream(self, client, chat_id):
         check = db.get(chat_id)
         popped = None
@@ -355,8 +392,12 @@ class Call(PyTgCalls):
             if popped:
                 await auto_clean(popped)
             if not check:
-                await _clear_(chat_id)
-                return await client.leave_call(chat_id)
+                refilled = False
+                if popped and await is_autoplay(chat_id):
+                    refilled = await self.fetch_and_queue_related(chat_id, popped)
+                if not refilled:
+                    await _clear_(chat_id)
+                    return await client.leave_call(chat_id)
         except:
             try:
                 await _clear_(chat_id)
@@ -390,31 +431,42 @@ class Call(PyTgCalls):
                         original_chat_id,
                         text=_["call_6"],
                     )
-                if video:
-                    stream = MediaStream(
-                        link,
-                        audio_parameters=AudioQuality.HIGH,
-                        video_parameters=VideoQuality.SD_480p,
-                        audio_flags=MediaStream.Flags.REQUIRED,
-                        video_flags=MediaStream.Flags.REQUIRED,
-                    )
-                else:
-                    stream = MediaStream(
+                def _build_live_stream():
+                    if video:
+                        return MediaStream(
+                            link,
+                            audio_parameters=AudioQuality.HIGH,
+                            video_parameters=VideoQuality.SD_480p,
+                            audio_flags=MediaStream.Flags.REQUIRED,
+                            video_flags=MediaStream.Flags.REQUIRED,
+                        )
+                    return MediaStream(
                         link,
                         audio_parameters=AudioQuality.HIGH,
                         video_flags=MediaStream.Flags.IGNORE,
                         audio_flags=MediaStream.Flags.REQUIRED,
                     )
-                try:
-                    await client.play(chat_id, stream)
-                except Exception as e:
-                    logger.error(f"change_stream (live_) failed for {chat_id}: {e}")
-                    return await app.send_message(
-                        original_chat_id,
-                        text=_["call_6"],
-                    )
+                for attempt in range(2):
+                    try:
+                        await client.play(chat_id, _build_live_stream())
+                        break
+                    except (NoAudioSourceFound, NoVideoSourceFound) as e:
+                        logger.error(f"change_stream (live_) source check failed for {chat_id} (attempt {attempt + 1}): {e}")
+                        if attempt == 1:
+                            return await app.send_message(
+                                original_chat_id,
+                                text=_["call_6"],
+                            )
+                        link = self._redirect_googlevideo_host(link)
+                        await asyncio.sleep(1)
+                    except Exception as e:
+                        logger.error(f"change_stream (live_) failed for {chat_id}: {e}")
+                        return await app.send_message(
+                            original_chat_id,
+                            text=_["call_6"],
+                        )
                 img = await get_thumb(videoid, user_id, title=title, duration=duration, thumbnail=thumbnail)
-                button = stream_markup(_, chat_id)
+                button = await stream_markup(_, chat_id)
                 run = await app.send_photo(
                     chat_id=original_chat_id,
                     photo=img,
@@ -437,41 +489,54 @@ class Call(PyTgCalls):
                         videoid=True,
                         video=True if str(streamtype) == "video" else False,
                     )
-                except:
+                except Exception as e:
+                    logger.error(f"change_stream (vid_) download failed for {chat_id}, videoid={videoid}: {e}")
                     return await mystic.edit_text(
                         _["call_6"], disable_web_page_preview=True
                     )
                 if not file_path:
                     # download() returned None (failed without raising) -> guard against
                     # MediaStream(None) TypeError; surface the clean failure message.
+                    logger.error(f"change_stream (vid_) download returned no file for {chat_id}, videoid={videoid}")
                     return await mystic.edit_text(
                         _["call_6"], disable_web_page_preview=True
                     )
-                if video:
-                    stream = MediaStream(
-                        file_path,
-                        audio_parameters=AudioQuality.HIGH,
-                        video_parameters=VideoQuality.SD_480p,
-                        audio_flags=MediaStream.Flags.REQUIRED,
-                        video_flags=MediaStream.Flags.REQUIRED,
-                    )
-                else:
-                    stream = MediaStream(
+                def _build_vid_stream():
+                    if video:
+                        return MediaStream(
+                            file_path,
+                            audio_parameters=AudioQuality.HIGH,
+                            video_parameters=VideoQuality.SD_480p,
+                            audio_flags=MediaStream.Flags.REQUIRED,
+                            video_flags=MediaStream.Flags.REQUIRED,
+                        )
+                    return MediaStream(
                         file_path,
                         audio_parameters=AudioQuality.HIGH,
                         video_flags=MediaStream.Flags.IGNORE,
                         audio_flags=MediaStream.Flags.REQUIRED,
                     )
-                try:
-                    await client.play(chat_id, stream)
-                except Exception as e:
-                    logger.error(f"change_stream (vid_) failed for {chat_id}: {e}")
-                    return await app.send_message(
-                        original_chat_id,
-                        text=_["call_6"],
-                    )
+                for attempt in range(2):
+                    try:
+                        await client.play(chat_id, _build_vid_stream())
+                        break
+                    except (NoAudioSourceFound, NoVideoSourceFound) as e:
+                        logger.error(f"change_stream (vid_) source check failed for {chat_id} (attempt {attempt + 1}): {e}")
+                        if attempt == 1:
+                            return await app.send_message(
+                                original_chat_id,
+                                text=_["call_6"],
+                            )
+                        file_path = self._redirect_googlevideo_host(file_path)
+                        await asyncio.sleep(1)
+                    except Exception as e:
+                        logger.error(f"change_stream (vid_) failed for {chat_id}: {e}")
+                        return await app.send_message(
+                            original_chat_id,
+                            text=_["call_6"],
+                        )
                 img = await get_thumb(videoid, user_id, title=title, duration=duration, thumbnail=thumbnail)
-                button = stream_markup(_, chat_id)
+                button = await stream_markup(_, chat_id)
                 await mystic.delete()
                 run = await app.send_photo(
                     chat_id=original_chat_id,
@@ -487,23 +552,36 @@ class Call(PyTgCalls):
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "stream"
             elif "index_" in queued:
-                stream = (
-                    MediaStream(
-                        videoid,
-                        audio_parameters=AudioQuality.HIGH,
-                        video_parameters=VideoQuality.SD_480p,
+                def _build_index_stream():
+                    return (
+                        MediaStream(
+                            videoid,
+                            audio_parameters=AudioQuality.HIGH,
+                            video_parameters=VideoQuality.SD_480p,
+                        )
+                        if str(streamtype) == "video"
+                        else MediaStream(videoid, audio_parameters=AudioQuality.HIGH, video_flags=MediaStream.Flags.IGNORE)
                     )
-                    if str(streamtype) == "video"
-                    else MediaStream(videoid, audio_parameters=AudioQuality.HIGH, video_flags=MediaStream.Flags.IGNORE)
-                )
-                try:
-                    await client.play(chat_id, stream)
-                except:
-                    return await app.send_message(
-                        original_chat_id,
-                        text=_["call_6"],
-                    )
-                button = stream_markup(_, chat_id)
+                for attempt in range(2):
+                    try:
+                        await client.play(chat_id, _build_index_stream())
+                        break
+                    except (NoAudioSourceFound, NoVideoSourceFound) as e:
+                        logger.error(f"change_stream (index_) source check failed for {chat_id} (attempt {attempt + 1}): {e}")
+                        if attempt == 1:
+                            return await app.send_message(
+                                original_chat_id,
+                                text=_["call_6"],
+                            )
+                        videoid = self._redirect_googlevideo_host(videoid)
+                        await asyncio.sleep(1)
+                    except Exception as e:
+                        logger.error(f"change_stream (index_) failed for {chat_id}: {e}")
+                        return await app.send_message(
+                            original_chat_id,
+                            text=_["call_6"],
+                        )
+                button = await stream_markup(_, chat_id)
                 run = await app.send_photo(
                     chat_id=original_chat_id,
                     photo=config.STREAM_IMG_URL,
@@ -513,32 +591,52 @@ class Call(PyTgCalls):
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "tg"
             else:
-                if video:
-                    stream = MediaStream(
-                        queued,
-                        audio_parameters=AudioQuality.HIGH,
-                        video_parameters=VideoQuality.SD_480p,
-                    )
-                else:
-                    stream = MediaStream(
+                # `queued` here is normally an already-resolved YouTube.download() result
+                # from queue time, not just a local file - in STREAMING=True deployments
+                # that's a live googlevideo URL, so it needs the same source-check retry
+                # and host redirect as the live_/vid_/index_ branches above.
+                def _build_final_stream():
+                    if video:
+                        return MediaStream(
+                            queued,
+                            audio_parameters=AudioQuality.HIGH,
+                            video_parameters=VideoQuality.SD_480p,
+                        )
+                    return MediaStream(
                         queued,
                         audio_parameters=AudioQuality.HIGH,
                         video_flags=MediaStream.Flags.IGNORE
                     )
-                try:
-                    await client.play(chat_id, stream)
-                except:
+                played = False
+                for attempt in range(2):
+                    try:
+                        await client.play(chat_id, _build_final_stream())
+                        played = True
+                        break
+                    except (NoAudioSourceFound, NoVideoSourceFound) as e:
+                        logger.error(f"change_stream source check failed for {chat_id} (attempt {attempt + 1}): {e}")
+                        if attempt == 1:
+                            break
+                        queued = self._redirect_googlevideo_host(queued)
+                        await asyncio.sleep(1)
+                    except Exception as e:
+                        logger.error(f"change_stream failed for {chat_id}: {e}")
+                        break
+                if not played:
                     try:
                         await client.leave_call(chat_id)
                         await asyncio.sleep(1)
-                        await client.play(chat_id, stream)
-                    except:
-                        return await app.send_message(
-                            original_chat_id,
-                            text=_["call_6"],
-                        )
+                        await client.play(chat_id, _build_final_stream())
+                        played = True
+                    except Exception as e:
+                        logger.error(f"change_stream rejoin failed for {chat_id}: {e}")
+                if not played:
+                    return await app.send_message(
+                        original_chat_id,
+                        text=_["call_6"],
+                    )
                 if videoid == "telegram":
-                    button = stream_markup(_, chat_id)
+                    button = await stream_markup(_, chat_id)
                     run = await app.send_photo(
                         chat_id=original_chat_id,
                         photo=config.TELEGRAM_AUDIO_URL
@@ -552,7 +650,7 @@ class Call(PyTgCalls):
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "tg"
                 elif videoid == "soundcloud":
-                    button = stream_markup(_, chat_id)
+                    button = await stream_markup(_, chat_id)
                     run = await app.send_photo(
                         chat_id=original_chat_id,
                         photo=config.SOUNCLOUD_IMG_URL,
@@ -565,7 +663,7 @@ class Call(PyTgCalls):
                     db[chat_id][0]["markup"] = "tg"
                 else:
                     img = await get_thumb(videoid, user_id, title=title, duration=duration, thumbnail=thumbnail)
-                    button = stream_markup(_, chat_id)
+                    button = await stream_markup(_, chat_id)
                     run = await app.send_photo(
                         chat_id=original_chat_id,
                         photo=img,
@@ -579,6 +677,7 @@ class Call(PyTgCalls):
                     )
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "stream"
+            await self.ensure_autoplay_queued(chat_id)
 
     async def ping(self):
         pings = []
@@ -650,6 +749,83 @@ class Call(PyTgCalls):
             task.cancel()
         autoend_tasks.pop(chat_id, None)
         autoend[chat_id] = {}
+
+    async def _autoplay_idle_runner(self, chat_id: int):
+        try:
+            await asyncio.sleep(AUTOPLAY_IDLE_MINUTES * 60)
+            if not await is_autoplay(chat_id):
+                autoplay_tasks.pop(chat_id, None)
+                return
+            await autoplay_off(chat_id)
+            autoplay_tasks.pop(chat_id, None)
+            try:
+                await self.stop_stream(chat_id)
+            except:
+                pass
+            try:
+                await app.send_message(
+                    chat_id,
+                    "» ʙᴏᴛ ᴀᴜᴛᴏᴍᴀᴛɪᴄᴀʟʟʏ ʟᴇғᴛ ᴠɪᴅᴇᴏᴄʜᴀᴛ ᴀɴᴅ ᴛᴜʀɴᴇᴅ ᴏғғ ᴀᴜᴛᴏᴘʟᴀʏ ᴅᴜᴇ ᴛᴏ ɪɴᴀᴄᴛɪᴠɪᴛʏ.",
+                )
+            except:
+                pass
+        except asyncio.CancelledError:
+            return
+
+    async def schedule_autoplay_idle(self, chat_id: int):
+        await cancel_autoplay_idle(chat_id)
+        autoplay_tasks[chat_id] = asyncio.create_task(self._autoplay_idle_runner(chat_id))
+
+    async def fetch_and_queue_related(self, chat_id: int, seed: dict) -> bool:
+        vidid = seed.get("vidid")
+        if not vidid or vidid in ("telegram", "soundcloud"):
+            return False
+        history = autoplay_history.setdefault(chat_id, [])
+        exclude = list(set(history) | {vidid})
+        related = await YouTube.related(vidid, exclude=exclude)
+        if not related:
+            logger.info(f"autoplay: no related track found for {chat_id}, seed vidid={vidid}")
+            return False
+        # Download now, like /play does when queuing behind an already-playing song
+        # (stream.py always resolves file_path before put_queue there) - the "vid_"
+        # lazy/download-at-play-time path this used to rely on is otherwise dead code
+        # in normal usage and isn't a reliable place to discover a bad download.
+        try:
+            file_path, direct = await YouTube.download(
+                related["vidid"],
+                None,
+                videoid=True,
+                video=str(seed["streamtype"]) == "video",
+            )
+        except Exception as e:
+            logger.error(f"autoplay: download failed for {chat_id}, vidid={related['vidid']}: {e}")
+            return False
+        if not file_path:
+            logger.error(f"autoplay: download returned no file for {chat_id}, vidid={related['vidid']}")
+            return False
+        await put_queue(
+            chat_id,
+            seed["chat_id"],
+            file_path if direct else f"vid_{related['vidid']}",
+            related["title"],
+            related["duration_min"],
+            "Autoplay",
+            related["vidid"],
+            0,
+            seed["streamtype"],
+            thumbnail=related.get("thumbnail"),
+        )
+        history.append(related["vidid"])
+        del history[:-20]
+        return True
+
+    async def ensure_autoplay_queued(self, chat_id: int):
+        if not await is_autoplay(chat_id):
+            return
+        check = db.get(chat_id)
+        if not check or len(check) > 1:
+            return
+        await self.fetch_and_queue_related(chat_id, check[0])
 
     async def decorators(self):
         @self.one.on_update(
