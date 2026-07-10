@@ -8,6 +8,8 @@ from pyrogram.types import InlineKeyboardMarkup
 from pytgcalls import PyTgCalls
 from pytgcalls.exceptions import (
     NoActiveGroupCall,
+    NoAudioSourceFound,
+    NoVideoSourceFound,
 )
 from ntgcalls import TelegramServerError
 from pytgcalls.types import Update, StreamEnded
@@ -37,6 +39,8 @@ from AnonXMusic.utils.inline.play import stream_markup
 from AnonXMusic.utils.thumbnails import get_thumb
 from AnonXMusic.utils.stream.autoclear import auto_clean, clear_queue_files
 from strings import get_string
+
+logger = LOGGER(__name__)
 
 autoend = {}
 autoend_tasks = {}
@@ -299,33 +303,35 @@ class Call(PyTgCalls):
         language = await get_lang(chat_id)
         _ = get_string(language)
         if not link:
-            # download()/extraction returned no path or URL. Raise the handled AssistantErr
-            # so the user sees a clean message instead of MediaStream(None) -> TypeError
-            # bubbling up as "something went wrong ... Exception: TypeError".
             raise AssistantErr(_["play_14"])
-        if video:
-            stream= MediaStream(
+        def _build_stream():
+            if video:
+                return MediaStream(
+                    link,
+                    audio_parameters=AudioQuality.HIGH,video_parameters=VideoQuality.SD_480p,
+                    audio_flags=MediaStream.Flags.REQUIRED,
+                    video_flags=MediaStream.Flags.REQUIRED,
+                    )
+            return MediaStream(
                 link,
-                audio_parameters=AudioQuality.HIGH,video_parameters=VideoQuality.SD_480p
-                )
-        else:
-            stream = MediaStream(link, audio_parameters=AudioQuality.HIGH,video_flags=MediaStream.Flags.IGNORE)
-        try:
-            await assistant.play(
-                chat_id,
-                stream
+                audio_parameters=AudioQuality.HIGH,
+                video_flags=MediaStream.Flags.IGNORE,
+                audio_flags=MediaStream.Flags.REQUIRED,
             )
-            # await assistant.join_group_call(
-            #     chat_id,
-            #     stream,
-            #     stream_type=StreamType().pulse_stream,
-            # )
-        except NoActiveGroupCall:
-            raise AssistantErr(_["call_8"])
-        except AlreadyJoinedError:
-            raise AssistantErr(_["call_9"])
-        except TelegramServerError:
-            raise AssistantErr(_["call_10"])
+
+        for attempt in range(2):
+            try:
+                await assistant.play(chat_id, _build_stream())
+                break
+            except (NoAudioSourceFound, NoVideoSourceFound) as e:
+                logger.error(f"MediaStream source check failed for {chat_id} (attempt {attempt + 1}): {e}")
+                if attempt == 1:
+                    raise AssistantErr(_["play_14"])
+                await asyncio.sleep(1)
+            except NoActiveGroupCall:
+                raise AssistantErr(_["call_8"])
+            except TelegramServerError:
+                raise AssistantErr(_["call_10"])
         await add_active_chat(chat_id)
         await music_on(chat_id)
         if video:
@@ -389,16 +395,20 @@ class Call(PyTgCalls):
                         link,
                         audio_parameters=AudioQuality.HIGH,
                         video_parameters=VideoQuality.SD_480p,
+                        audio_flags=MediaStream.Flags.REQUIRED,
+                        video_flags=MediaStream.Flags.REQUIRED,
                     )
                 else:
                     stream = MediaStream(
                         link,
                         audio_parameters=AudioQuality.HIGH,
-                        video_flags=MediaStream.Flags.IGNORE
+                        video_flags=MediaStream.Flags.IGNORE,
+                        audio_flags=MediaStream.Flags.REQUIRED,
                     )
                 try:
                     await client.play(chat_id, stream)
-                except Exception:
+                except Exception as e:
+                    logger.error(f"change_stream (live_) failed for {chat_id}: {e}")
                     return await app.send_message(
                         original_chat_id,
                         text=_["call_6"],
@@ -442,16 +452,20 @@ class Call(PyTgCalls):
                         file_path,
                         audio_parameters=AudioQuality.HIGH,
                         video_parameters=VideoQuality.SD_480p,
+                        audio_flags=MediaStream.Flags.REQUIRED,
+                        video_flags=MediaStream.Flags.REQUIRED,
                     )
                 else:
                     stream = MediaStream(
                         file_path,
                         audio_parameters=AudioQuality.HIGH,
-                        video_flags=MediaStream.Flags.IGNORE
+                        video_flags=MediaStream.Flags.IGNORE,
+                        audio_flags=MediaStream.Flags.REQUIRED,
                     )
                 try:
                     await client.play(chat_id, stream)
-                except:
+                except Exception as e:
+                    logger.error(f"change_stream (vid_) failed for {chat_id}: {e}")
                     return await app.send_message(
                         original_chat_id,
                         text=_["call_6"],

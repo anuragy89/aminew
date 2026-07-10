@@ -5,6 +5,7 @@ import os
 import re
 import sys
 from typing import Union
+from urllib.parse import parse_qs, urlparse
 import aiohttp
 import requests
 import yt_dlp
@@ -18,6 +19,8 @@ from AnonXMusic.utils.formatters import time_to_seconds
 from config import STREAMING, YT_API_KEY, YTPROXY_URL as YTPROXY
 
 logger = LOGGER(__name__)
+
+AUDIO_VIA_VIDEO = True  # Set to True to always download video and extract audio, instead of direct audio stream
 
 async def shell_cmd(cmd):
     proc = await asyncio.create_subprocess_shell(
@@ -156,6 +159,63 @@ class YouTubeAPI:
                 os.remove(filepath)
             return None
     
+    @staticmethod
+    def _is_googlevideo_url(url):
+        return bool(re.match(r".*googlevideo\.com/", url))
+
+    @staticmethod
+    def _content_length_from_url(url):
+        try:
+            return int(parse_qs(urlparse(url).query).get("clen", [0])[0])
+        except (TypeError, ValueError):
+            return 0
+
+    async def _download_googlevideo(self, url, filepath, chunk_size=1_000_000):
+        try:
+            total_size = self._content_length_from_url(url)
+
+            timeout = aiohttp.ClientTimeout(total=300)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                with open(filepath, 'wb') as f:
+                    start = 0
+                    while total_size == 0 or start < total_size:
+                        end = start + chunk_size - 1
+                        if total_size:
+                            end = min(end, total_size - 1)
+                        range_headers = {"Range": f"bytes={start}-{end}"}
+
+                        data = None
+                        for attempt in range(3):
+                            async with session.get(url, headers=range_headers) as response:
+                                if response.status == 416:
+                                    data = b""
+                                    break
+                                if response.status in (403, 429) and attempt < 2:
+                                    # Transient CDN block - back off and retry the same range.
+                                    logger.warning(f"Googlevideo status {response.status}, retrying in {2 ** attempt}s")
+                                    await asyncio.sleep(2 ** attempt)
+                                    continue
+                                if response.status not in (200, 206):
+                                    logger.error(f"Ranged download failed with status {response.status}")
+                                    return None
+                                data = await response.read()
+                                break
+
+                        if not data:
+                            break
+                        f.write(data)
+                        start += len(data)
+                        if total_size == 0 and len(data) < chunk_size:
+                            break
+
+            return filepath
+
+        except Exception as e:
+            logger.error(f"Googlevideo ranged download failed: {str(e)}")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            return None
+
     async def _download_parallel(self, url, filepath, headers, num_connections=4):
         """Download file in parallel using multiple Range requests"""
         try:
@@ -220,11 +280,37 @@ class YouTubeAPI:
             logger.error(f"Error fetching {media_type} URL: {str(e)}")
         return None, None
 
-    async def _download_media(self, vid_id, filepath, media_type='audio'):
-        """Unified download method for audio/video"""
-        if os.path.exists(filepath):
-            return filepath
+    @staticmethod
+    async def _extract_audio(video_path, audio_path):
+        """Strip the audio track out of a downloaded video file with ffmpeg."""
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", video_path, "-vn", "-c:a", "libmp3lame", "-q:a", "2", audio_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
 
+        if proc.returncode != 0 or not os.path.exists(audio_path):
+            logger.error(f"ffmpeg audio extraction failed: {stderr.decode(errors='ignore').strip()}")
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+            return None
+        return audio_path
+
+    async def _download_audio_via_video(self, vid_id, filepath):
+        """Download the video stream, then convert it to audio at `filepath`."""
+        video_path = f"{os.path.splitext(filepath)[0]}.src.mp4"
+        try:
+            if not await self._download_url(vid_id, video_path, 'video'):
+                return None
+            return await self._extract_audio(video_path, filepath)
+        finally:
+            if os.path.exists(video_path):
+                os.remove(video_path)
+
+    async def _download_url(self, vid_id, filepath, media_type):
+        """Fetch the media URL and download it, retrying once on a dead URL."""
         media_url, cookie = await self._fetch_media_url(vid_id, media_type)
         if not media_url:
             return None
@@ -233,7 +319,7 @@ class YouTubeAPI:
             # cookie isn't attached here (see README for the ffmpeg-header follow-up).
             return media_url
 
-        result = await self._download_parallel(media_url, filepath, self._get_headers(cookie))
+        result = await self._download_media_url(media_url, filepath, self._get_headers(cookie))
         if result:
             return result
 
@@ -244,7 +330,25 @@ class YouTubeAPI:
         media_url, cookie = await self._fetch_media_url(vid_id, media_type)
         if not media_url:
             return None
-        return await self._download_parallel(media_url, filepath, self._get_headers(cookie))
+        return await self._download_media_url(media_url, filepath, self._get_headers(cookie))
+
+    async def _download_media_url(self, media_url, filepath, headers):
+        """Pick the right downloader for a resolved media URL."""
+        if self._is_googlevideo_url(media_url):
+            return await self._download_googlevideo(media_url, filepath)
+        return await self._download_parallel(media_url, filepath, headers)
+
+    async def _download_media(self, vid_id, filepath, media_type='audio'):
+        """Unified download method for audio/video"""
+        if os.path.exists(filepath):
+            return filepath
+
+        if media_type == 'audio' and AUDIO_VIA_VIDEO:
+            if STREAMING:
+                return await self._download_url(vid_id, filepath, 'video')
+            return await self._download_audio_via_video(vid_id, filepath)
+
+        return await self._download_url(vid_id, filepath, media_type)
         
 
 
