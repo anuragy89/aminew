@@ -22,6 +22,21 @@ YTPROXY_URL = getenv("YTPROXY_URL", 'https://tgapi.xbitcode.com') ## xBit Music 
 YT_API_KEY = getenv("YT_API_KEY" , None ) ## Get your api key from https://music.xbitcode.com
 STREAMING = getenv("STREAMING" , False )
 
+# Playback mode: "download" | "stream" | "hybrid".
+#   download -> fetch the file, then hand the local path to pytgcalls (best quality, slowest start).
+#   stream   -> hand the media URL straight to pytgcalls (fastest start, can be laggy).
+#   hybrid   -> stream the current song instantly, and pre-download the *next* queued song in the
+#               background while it plays (upgrades to the local file if the download finishes in
+#               time, otherwise streams its URL). Falls back to the old STREAMING flag if unset.
+def _resolve_playback_mode():
+    mode = str(getenv("PLAYBACK_MODE", "") or "").strip().lower()
+    if mode in ("download", "stream", "hybrid"):
+        return mode
+    # Back-compat: honour the legacy STREAMING flag when PLAYBACK_MODE is not set.
+    return "stream" if str(STREAMING).strip().lower() in ("true", "1", "yes", "on") else "download"
+
+PLAYBACK_MODE = _resolve_playback_mode()
+
 ## Other vaes
 DURATION_LIMIT_MIN = int(getenv("DURATION_LIMIT", 300))
 

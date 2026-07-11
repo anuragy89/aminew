@@ -46,6 +46,13 @@ from strings import get_string
 
 logger = LOGGER(__name__)
 
+# Async-resampling filter for streamed audio. pytgcalls pipes raw PCM to ntgcalls at a
+# fixed 48 kHz clock; some googlevideo/DASH URLs have irregular/absent PTS, letting a burst
+# be consumed faster than real time -> sped-up ("chipmunk") audio. `aresample=async=1` keeps
+# the output sample-accurate to that clock. Harmless no-op on well-formed local files.
+# Syntax: `--audio` selects the audio sub-stream, `---mid` places tokens right after `-i`.
+AUDIO_FFMPEG_PARAMS = "--audio ---mid -af aresample=async=1"
+
 autoend = {}
 autoend_tasks = {}
 counter = {}
@@ -64,6 +71,7 @@ async def cancel_autoplay_idle(chat_id):
 
 async def _clear_(chat_id):
     queue = db.get(chat_id, [])
+    YouTube.cancel_prefetch_for_queue(queue)
     await clear_queue_files(chat_id, queue)
     db[chat_id] = []
     await remove_active_video_chat(chat_id)
@@ -274,8 +282,14 @@ class Call(PyTgCalls):
                     link,
                     audio_parameters=AudioQuality.HIGH,
                     video_parameters=VideoQuality.SD_480p,
+                    ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                 )
-            return MediaStream(link, audio_parameters=AudioQuality.HIGH, video_flags=MediaStream.Flags.IGNORE)
+            return MediaStream(
+                link,
+                audio_parameters=AudioQuality.HIGH,
+                video_flags=MediaStream.Flags.IGNORE,
+                ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
+            )
         for attempt in range(2):
             try:
                 await assistant.play(chat_id, _build_stream())
@@ -335,12 +349,14 @@ class Call(PyTgCalls):
                     audio_parameters=AudioQuality.HIGH,video_parameters=VideoQuality.SD_480p,
                     audio_flags=MediaStream.Flags.REQUIRED,
                     video_flags=MediaStream.Flags.REQUIRED,
+                    ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                     )
             return MediaStream(
                 link,
                 audio_parameters=AudioQuality.HIGH,
                 video_flags=MediaStream.Flags.IGNORE,
                 audio_flags=MediaStream.Flags.REQUIRED,
+                ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
             )
 
         for attempt in range(2):
@@ -425,6 +441,7 @@ class Call(PyTgCalls):
                         video_parameters=VideoQuality.SD_480p,
                         audio_flags=MediaStream.Flags.REQUIRED,
                         video_flags=MediaStream.Flags.REQUIRED,
+                        ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                     )
                 else:
                     stream = MediaStream(
@@ -432,6 +449,7 @@ class Call(PyTgCalls):
                         audio_parameters=AudioQuality.HIGH,
                         video_flags=MediaStream.Flags.IGNORE,
                         audio_flags=MediaStream.Flags.REQUIRED,
+                        ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                     )
                 try:
                     await client.play(chat_id, stream)
@@ -482,6 +500,7 @@ class Call(PyTgCalls):
                         video_parameters=VideoQuality.SD_480p,
                         audio_flags=MediaStream.Flags.REQUIRED,
                         video_flags=MediaStream.Flags.REQUIRED,
+                        ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                     )
                 else:
                     stream = MediaStream(
@@ -489,6 +508,7 @@ class Call(PyTgCalls):
                         audio_parameters=AudioQuality.HIGH,
                         video_flags=MediaStream.Flags.IGNORE,
                         audio_flags=MediaStream.Flags.REQUIRED,
+                        ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                     )
                 try:
                     await client.play(chat_id, stream)
@@ -520,9 +540,15 @@ class Call(PyTgCalls):
                         videoid,
                         audio_parameters=AudioQuality.HIGH,
                         video_parameters=VideoQuality.SD_480p,
+                        ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                     )
                     if str(streamtype) == "video"
-                    else MediaStream(videoid, audio_parameters=AudioQuality.HIGH, video_flags=MediaStream.Flags.IGNORE)
+                    else MediaStream(
+                        videoid,
+                        audio_parameters=AudioQuality.HIGH,
+                        video_flags=MediaStream.Flags.IGNORE,
+                        ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
+                    )
                 )
                 try:
                     await client.play(chat_id, stream)
@@ -547,11 +573,13 @@ class Call(PyTgCalls):
                             queued,
                             audio_parameters=AudioQuality.HIGH,
                             video_parameters=VideoQuality.SD_480p,
+                            ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                         )
                     return MediaStream(
                         queued,
                         audio_parameters=AudioQuality.HIGH,
-                        video_flags=MediaStream.Flags.IGNORE
+                        video_flags=MediaStream.Flags.IGNORE,
+                        ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                     )
                 played = False
                 for attempt in range(2):
@@ -623,6 +651,7 @@ class Call(PyTgCalls):
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "stream"
             await self.ensure_autoplay_queued(chat_id)
+            await self.ensure_prefetch(chat_id)
 
     async def ping(self):
         pings = []
@@ -767,6 +796,24 @@ class Call(PyTgCalls):
         if not check or len(check) > 1:
             return
         await self.fetch_and_queue_related(chat_id, check[0])
+
+    async def ensure_prefetch(self, chat_id: int):
+        """Hybrid mode: pre-download the next queued song while the current one plays.
+
+        Targets only the up-next entry (index 1) so playlists/long queues download one
+        song ahead instead of all at once; the following song is picked up when this one
+        starts playing. No-op unless the next entry is still a deferred `vid_` YouTube marker.
+        """
+        if config.PLAYBACK_MODE != "hybrid":
+            return
+        q = db.get(chat_id)
+        if not q or len(q) < 2:
+            return
+        entry = q[1]
+        if not str(entry.get("file", "")).startswith("vid_"):
+            return
+        video = str(entry.get("streamtype")) == "video"
+        YouTube.start_prefetch(entry, video)
 
     async def decorators(self):
         @self.one.on_update(

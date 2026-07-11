@@ -249,3 +249,4 @@ async def skip(cli, message: Message, _, chat_id):
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "stream"
     await Anony.ensure_autoplay_queued(chat_id)
+    await Anony.ensure_prefetch(chat_id)

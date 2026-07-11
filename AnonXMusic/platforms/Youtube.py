@@ -16,7 +16,7 @@ from ytSearch import VideosSearch, Playlist
 from ytSearch.suggestions import VideoSuggestions
 from AnonXMusic import LOGGER
 from AnonXMusic.utils.formatters import time_to_seconds
-from config import DURATION_LIMIT, STREAMING, YT_API_KEY, YTPROXY_URL as YTPROXY
+from config import DURATION_LIMIT, PLAYBACK_MODE, STREAMING, YT_API_KEY, YTPROXY_URL as YTPROXY
 
 logger = LOGGER(__name__)
 
@@ -39,7 +39,9 @@ class YouTubeAPI:
     _api_headers = None
     _session = None
     _config_validated = False
-    
+    # Hybrid-mode background pre-downloads, keyed by video id -> asyncio.Task.
+    _prefetch_tasks = {}
+
     def __init__(self):
         self.base = "https://www.youtube.com/watch?v="
         self.regex = r"(?:youtube\.com|youtu\.be)"
@@ -221,18 +223,18 @@ class YouTubeAPI:
             logger.error(f"Error fetching {media_type} URL: {str(e)}")
         return None, None
 
-    async def _download_media(self, vid_id, filepath, media_type='audio'):
-        """Unified download method for audio/video"""
-        if os.path.exists(filepath):
-            return filepath
+    async def _download_full(self, vid_id, filepath, media_type, headers_url=None):
+        """Fully download the media to `filepath`, with a single re-fetch/retry on failure.
 
-        media_url, cookie = await self._fetch_media_url(vid_id, media_type)
+        `headers_url` is an optional (media_url, cookie) pair already fetched by the caller
+        (avoids a duplicate /info call); when omitted we fetch it here.
+        """
+        if headers_url is None:
+            media_url, cookie = await self._fetch_media_url(vid_id, media_type)
+        else:
+            media_url, cookie = headers_url
         if not media_url:
             return None
-        elif STREAMING:
-            # Direct-stream mode: py-tgcalls/ffmpeg fetches the URL itself, so the affinity
-            # cookie isn't attached here (see README for the ffmpeg-header follow-up).
-            return media_url
 
         result = await self._download_parallel(media_url, filepath, self._get_headers(cookie))
         if result:
@@ -242,11 +244,117 @@ class YouTubeAPI:
         # egress-IP mismatch). Re-fetch /info once — the router re-steers to a dyno whose
         # IP matches and issues a fresh affinity cookie — then retry the download.
         logger.warning(f"Download failed for {vid_id} ({media_type}); re-fetching URL and retrying once")
+        await asyncio.sleep(2)  # brief pause to avoid hammering the API
         media_url, cookie = await self._fetch_media_url(vid_id, media_type)
         if not media_url:
             return None
         return await self._download_parallel(media_url, filepath, self._get_headers(cookie))
-        
+
+    async def _download_media(self, vid_id, filepath, media_type='audio', force_download=False):
+        """Resolve media to a playable target (local path or direct URL) for the current mode.
+
+        - download mode (or force_download for the /song feature): fully download -> local path.
+        - stream mode: hand back the media URL for py-tgcalls/ffmpeg to fetch itself.
+        - hybrid mode: if a background pre-download has already produced the file, use it;
+          otherwise cancel any in-flight pre-download and stream the URL now (a play/skip
+          means "play it immediately" — quality yields to responsiveness).
+        """
+        if os.path.exists(filepath):
+            # A completed pre-download (or an earlier play) already left the whole file here.
+            return filepath
+
+        if not force_download and PLAYBACK_MODE in ("stream", "hybrid"):
+            if PLAYBACK_MODE == "hybrid":
+                # We're resolving this song to play right now; don't let a background
+                # pre-download keep racing/writing the same file behind us.
+                self.cancel_prefetch(vid_id)
+            # Direct-stream: py-tgcalls/ffmpeg fetches the URL itself, so the affinity
+            # cookie isn't attached here (see README for the ffmpeg-header follow-up).
+            media_url, _cookie = await self._fetch_media_url(vid_id, media_type)
+            return media_url
+
+        return await self._download_full(vid_id, filepath, media_type)
+
+    @classmethod
+    def cancel_prefetch(cls, vidid):
+        """Cancel (and forget) any in-flight hybrid pre-download for `vidid`."""
+        if not vidid:
+            return
+        task = cls._prefetch_tasks.pop(vidid, None)
+        if task and not task.done():
+            task.cancel()
+
+    @classmethod
+    def cancel_prefetch_for_queue(cls, queue):
+        """Cancel pre-downloads for every entry in a queue (used on stop/clear)."""
+        for item in queue or []:
+            try:
+                cls.cancel_prefetch(item.get("vidid"))
+            except Exception:
+                pass
+
+    def start_prefetch(self, entry, video=False, delay=3.5):
+        """Kick off a background pre-download for a queued song (hybrid mode).
+
+        `entry` is the live queue dict; when the download finishes we update `entry['file']`
+        in place (the queue holds the same object), so change_stream/skip find a local path
+        instead of the deferred `vid_` marker. One task per video id at a time.
+        """
+        vidid = entry.get("vidid")
+        if not vidid or vidid in self._prefetch_tasks:
+            return
+        task = asyncio.create_task(self._prefetch_worker(entry, video, delay))
+        self._prefetch_tasks[vidid] = task
+
+    async def _prefetch_worker(self, entry, video, delay):
+        vidid = entry.get("vidid")
+        media_type = "video" if video else "audio"
+        ext = "mp4" if video else "mp3"
+        filepath = os.path.join("downloads", f"{vidid}.{ext}")
+        tmp = filepath + ".part"
+        media_url = None
+        try:
+            # Warm-up: request the URL immediately so the backend propagates/primes it,
+            # then wait a few seconds before actually pulling the bytes.
+            media_url, cookie = await self._fetch_media_url(vidid, media_type)
+            await asyncio.sleep(delay)
+
+            result = None
+            if os.path.exists(filepath):
+                result = filepath
+            elif media_url:
+                dl = await self._download_parallel(media_url, tmp, self._get_headers(cookie))
+                if not dl:
+                    # URL may have expired during the warm-up wait; re-fetch once.
+                    media_url, cookie = await self._fetch_media_url(vidid, media_type)
+                    if media_url:
+                        dl = await self._download_parallel(media_url, tmp, self._get_headers(cookie))
+                if dl and os.path.exists(tmp):
+                    # Publish atomically so a half-written file is never seen as complete.
+                    try:
+                        os.replace(tmp, filepath)
+                        result = filepath
+                    except Exception as e:
+                        logger.error(f"prefetch rename failed for {vidid}: {e}")
+
+            # Only commit if the entry is still the deferred marker (not skipped/played yet).
+            if str(entry.get("file", "")).startswith("vid_"):
+                if result:
+                    entry["file"] = result            # quality upgrade to local file
+                elif media_url:
+                    entry["file"] = media_url          # graceful fallback: stream the URL
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"prefetch worker failed for {vidid}: {e}")
+        finally:
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except Exception:
+                pass
+            self._prefetch_tasks.pop(vidid, None)
+
 
 
     async def exists(self, link: str, videoid: Union[bool, str] = None):
@@ -566,20 +674,25 @@ class YouTubeAPI:
             vid_id = link
             link = self.base + link
         
+        # /song downloads must always yield a real file to upload, regardless of mode.
         if songvideo:
             filepath = f"downloads/{title}.mp4"
-            result = await self._download_media(vid_id, filepath, 'video')
+            result = await self._download_media(vid_id, filepath, 'video', force_download=True)
             return result
         elif songaudio:
             filepath = f"downloads/{title}.mp3"
-            result = await self._download_media(vid_id, filepath, 'audio')
+            result = await self._download_media(vid_id, filepath, 'audio', force_download=True)
             return result
-        elif video:
+        # In hybrid mode we defer to a `vid_` queue marker (direct=False) so the song is
+        # streamed instantly and pre-downloaded in the background; other modes store the
+        # resolved path/URL directly (direct=True).
+        direct = PLAYBACK_MODE != "hybrid"
+        if video:
             filepath = os.path.join("downloads", f"{vid_id}.mp4")
             downloaded_file = await self._download_media(vid_id, filepath, 'video')
-            return downloaded_file, True
+            return downloaded_file, direct
         else:
             filepath = os.path.join("downloads", f"{vid_id}.mp3")
             downloaded_file = await self._download_media(vid_id, filepath, 'audio')
-            return downloaded_file, True
+            return downloaded_file, direct
 

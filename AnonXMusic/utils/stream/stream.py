@@ -127,6 +127,7 @@ async def stream(
                 )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "stream"
+        await Anony.ensure_prefetch(chat_id)
         if count == 0:
             return
         else:
@@ -175,6 +176,7 @@ async def stream(
                 thumbnail=thumbnail,
             )
             position = len(db.get(chat_id)) - 1
+            await Anony.ensure_prefetch(chat_id)
             button = aq_markup(_, chat_id)
             await app.send_message(
                 chat_id=original_chat_id,
