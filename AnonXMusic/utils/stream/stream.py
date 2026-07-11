@@ -99,10 +99,11 @@ async def stream(
                     video=status,
                     image=thumbnail,
                 )
+                # Playing now -> store the resolved source, not a deferred vid_ marker.
                 await put_queue(
                     chat_id,
                     original_chat_id,
-                    file_path if direct else f"vid_{vidid}",
+                    file_path,
                     title,
                     duration_min,
                     user_name,
@@ -193,10 +194,13 @@ async def stream(
                 video=status,
                 image=thumbnail,
             )
+            # This song is playing now; store its resolved source (never a deferred vid_
+            # marker) so seek/speed/loop act on it via the plain path. Deferral + prefetch
+            # only applies to songs that are queued behind the current one.
             await put_queue(
                 chat_id,
                 original_chat_id,
-                file_path if direct else f"vid_{vidid}",
+                file_path,
                 title,
                 duration_min,
                 user_name,

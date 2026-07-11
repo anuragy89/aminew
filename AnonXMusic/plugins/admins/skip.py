@@ -165,6 +165,8 @@ async def skip(cli, message: Message, _, chat_id):
         except Exception as e:
             logger.error(f"skip (vid_) play failed for {chat_id}, videoid={videoid}, file={file_path}: {e}")
             return await mystic.edit_text(_["call_6"])
+        # Now playing: replace the deferred vid_ marker with the resolved source.
+        db[chat_id][0]["file"] = file_path
         button = await stream_markup(_, chat_id)
         img = await get_thumb(videoid, user_id, title=title, duration=duration, thumbnail=thumbnail)
         run = await message.reply_photo(

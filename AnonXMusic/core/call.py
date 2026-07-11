@@ -46,12 +46,6 @@ from strings import get_string
 
 logger = LOGGER(__name__)
 
-# Async-resampling filter for streamed audio. pytgcalls pipes raw PCM to ntgcalls at a
-# fixed 48 kHz clock; some googlevideo/DASH URLs have irregular/absent PTS, letting a burst
-# be consumed faster than real time -> sped-up ("chipmunk") audio. `aresample=async=1` keeps
-# the output sample-accurate to that clock. Harmless no-op on well-formed local files.
-# Syntax: `--audio` selects the audio sub-stream, `---mid` places tokens right after `-i`.
-AUDIO_FFMPEG_PARAMS = "--audio ---mid -af aresample=async=1"
 
 autoend = {}
 autoend_tasks = {}
@@ -282,13 +276,11 @@ class Call(PyTgCalls):
                     link,
                     audio_parameters=AudioQuality.HIGH,
                     video_parameters=VideoQuality.SD_480p,
-                    ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                 )
             return MediaStream(
                 link,
                 audio_parameters=AudioQuality.HIGH,
                 video_flags=MediaStream.Flags.IGNORE,
-                ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
             )
         for attempt in range(2):
             try:
@@ -349,14 +341,12 @@ class Call(PyTgCalls):
                     audio_parameters=AudioQuality.HIGH,video_parameters=VideoQuality.SD_480p,
                     audio_flags=MediaStream.Flags.REQUIRED,
                     video_flags=MediaStream.Flags.REQUIRED,
-                    ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                     )
             return MediaStream(
                 link,
                 audio_parameters=AudioQuality.HIGH,
                 video_flags=MediaStream.Flags.IGNORE,
                 audio_flags=MediaStream.Flags.REQUIRED,
-                ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
             )
 
         for attempt in range(2):
@@ -441,15 +431,13 @@ class Call(PyTgCalls):
                         video_parameters=VideoQuality.SD_480p,
                         audio_flags=MediaStream.Flags.REQUIRED,
                         video_flags=MediaStream.Flags.REQUIRED,
-                        ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                     )
                 else:
                     stream = MediaStream(
                         link,
                         audio_parameters=AudioQuality.HIGH,
                         video_flags=MediaStream.Flags.IGNORE,
-                        audio_flags=MediaStream.Flags.REQUIRED,
-                        ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
+                        audio_flags=MediaStream.Flags.REQUIRED, 
                     )
                 try:
                     await client.play(chat_id, stream)
@@ -500,7 +488,6 @@ class Call(PyTgCalls):
                         video_parameters=VideoQuality.SD_480p,
                         audio_flags=MediaStream.Flags.REQUIRED,
                         video_flags=MediaStream.Flags.REQUIRED,
-                        ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                     )
                 else:
                     stream = MediaStream(
@@ -508,7 +495,6 @@ class Call(PyTgCalls):
                         audio_parameters=AudioQuality.HIGH,
                         video_flags=MediaStream.Flags.IGNORE,
                         audio_flags=MediaStream.Flags.REQUIRED,
-                        ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                     )
                 try:
                     await client.play(chat_id, stream)
@@ -518,6 +504,9 @@ class Call(PyTgCalls):
                         original_chat_id,
                         text=_["call_6"],
                     )
+                # Now playing: replace the deferred vid_ marker with the resolved source so
+                # seek/speed/loop operate on it via the plain path.
+                db[chat_id][0]["file"] = file_path
                 img = await get_thumb(videoid, user_id, title=title, duration=duration, thumbnail=thumbnail)
                 button = await stream_markup(_, chat_id)
                 await mystic.delete()
@@ -540,14 +529,12 @@ class Call(PyTgCalls):
                         videoid,
                         audio_parameters=AudioQuality.HIGH,
                         video_parameters=VideoQuality.SD_480p,
-                        ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                     )
                     if str(streamtype) == "video"
                     else MediaStream(
                         videoid,
                         audio_parameters=AudioQuality.HIGH,
                         video_flags=MediaStream.Flags.IGNORE,
-                        ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                     )
                 )
                 try:
@@ -573,13 +560,11 @@ class Call(PyTgCalls):
                             queued,
                             audio_parameters=AudioQuality.HIGH,
                             video_parameters=VideoQuality.SD_480p,
-                            ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                         )
                     return MediaStream(
                         queued,
                         audio_parameters=AudioQuality.HIGH,
                         video_flags=MediaStream.Flags.IGNORE,
-                        ffmpeg_parameters=AUDIO_FFMPEG_PARAMS,
                     )
                 played = False
                 for attempt in range(2):

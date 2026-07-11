@@ -47,8 +47,15 @@ async def seek_comm(cli, message: Message, _, chat_id):
         to_seek = duration_played + duration_to_skip + 1
     mystic = await message.reply_text(_["admin_24"])
     if "vid_" in file_path:
-        n, file_path = await YouTube.video(playing[0]["vidid"], True)
-        if n == 0:
+        # Resolve the deferred marker through the API (same as playback) instead of raw
+        # yt-dlp; in hybrid/stream mode this is the currently-playing song's queue value.
+        file_path, _direct = await YouTube.download(
+            playing[0]["vidid"],
+            mystic,
+            videoid=True,
+            video=str(playing[0]["streamtype"]) == "video",
+        )
+        if not file_path:
             return await message.reply_text(_["admin_22"])
     check = (playing[0]).get("speed_path")
     if check:
