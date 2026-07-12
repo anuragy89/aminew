@@ -102,25 +102,25 @@ votemode = {}
 autoclean = []
 confirmer = {}
 
+
 START_IMG_URL = getenv(
     "START_IMG_URL",
-    "https://ibb.co/PGvmH533 https://ibb.co/PGvmH533 ",
+    "https://ibb.co/S4nBS8nn https://ibb.co/S4nBS8nn https://ibb.co/S4nBS8nn https://ibb.co/S4nBS8nn",
 ).split()
     
 PING_IMG_URL = getenv(
-    "PING_IMG_URL", "https://ibb.co/PGvmH533"
+    "PING_IMG_URL", "https://ibb.co/S4nBS8nn"
 )
-PLAYLIST_IMG_URL = "https://ibb.co/PGvmH533"
-STATS_IMG_URL = "https://ibb.co/PGvmH533"
-TELEGRAM_AUDIO_URL = "https://ibb.co/PGvmH533"
-TELEGRAM_VIDEO_URL = "https://ibb.co/PGvmH533"
-STREAM_IMG_URL = "https://ibb.co/PGvmH533"
-SOUNCLOUD_IMG_URL = "https://ibb.co/PGvmH533"
-YOUTUBE_IMG_URL = "https://ibb.co/PGvmH533"
-SPOTIFY_ARTIST_IMG_URL = "https://ibb.co/PGvmH533"
-SPOTIFY_ALBUM_IMG_URL = "https://ibb.co/PGvmH533"
-SPOTIFY_PLAYLIST_IMG_URL = "https://ibb.co/PGvmH533"
-
+PLAYLIST_IMG_URL = "https://ibb.co/S4nBS8nn"
+STATS_IMG_URL = "https://ibb.co/S4nBS8nn"
+TELEGRAM_AUDIO_URL = "https://ibb.co/S4nBS8nn"
+TELEGRAM_VIDEO_URL = "https://ibb.co/S4nBS8nn"
+STREAM_IMG_URL = "https://graph.org/file/ff2af8d4d10afa1baf49e.jpg"
+SOUNCLOUD_IMG_URL = "https://graph.org/file/c95a687e777b55be1c792.jpg"
+YOUTUBE_IMG_URL = "https://ibb.co/S4nBS8nn"
+SPOTIFY_ARTIST_IMG_URL = "https://graph.org/file/0bb6f36796d496b4254ff.jpg"
+SPOTIFY_ALBUM_IMG_URL = "https://graph.org/file/0bb6f36796d496b4254ff.jpg"
+SPOTIFY_PLAYLIST_IMG_URL = "https://graph.org/file/0bb6f36796d496b4254ff.jpg"
 
 
 def time_to_seconds(time):
