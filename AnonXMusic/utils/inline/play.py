@@ -64,7 +64,7 @@ async def stream_markup_timer(_, chat_id, played, dur):
         ],
         [
             InlineKeyboardButton(
-                text="🔁 Autoplay: ON" if autoplay_state else "🔁 Autoplay: OFF",
+                text="🔁ᴛᴀᴘ ᴛᴏ ᴏɴ ᴀᴜᴛᴏᴘʟᴀʏ:✅" if autoplay_state else "🔁ᴛᴀᴘ ᴛᴏ ᴏɴ ᴀᴜᴛᴏᴘʟᴀʏ:❌",
                 callback_data=f"ADMIN Autoplay|{chat_id}",
             ),
         ],
@@ -85,7 +85,7 @@ async def stream_markup(_, chat_id):
     buttons = [
         [
             InlineKeyboardButton(
-                text="🔁 Autoplay: ON" if autoplay_state else "🔁 Autoplay: OFF",
+                text="🔁ᴛᴀᴘ ᴛᴏ ᴏɴ ᴀᴜᴛᴏᴘʟᴀʏ:✅" if autoplay_state else "🔁ᴛᴀᴘ ᴛᴏ ᴏɴ ᴀᴜᴛᴏᴘʟᴀʏ:❌",
                 callback_data=f"ADMIN Autoplay|{chat_id}",
             ),
         ],
