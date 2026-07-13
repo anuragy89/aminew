@@ -55,7 +55,7 @@ async def stream_markup_timer(_, chat_id, played, dur):
     else:
         bar = "—————————◉"
     autoplay_state = await is_autoplay(chat_id)
-     buttons = [
+    buttons = [
         [
             InlineKeyboardButton(
                 text=f"{played} {bar} {dur}",
@@ -82,7 +82,7 @@ async def stream_markup_timer(_, chat_id, played, dur):
 
 async def stream_markup(_, chat_id):
     autoplay_state = await is_autoplay(chat_id)
-     buttons = [
+    buttons = [
         [
             InlineKeyboardButton(
                 text="🔁ᴛᴀᴘ ᴛᴏ ᴏꜰꜰ ᴀᴜᴛᴏᴘʟᴀʏ:✅" if autoplay_state else "🔁ᴛᴀᴘ ᴛᴏ ᴏɴ ᴀᴜᴛᴏᴘʟᴀʏ:❌",
