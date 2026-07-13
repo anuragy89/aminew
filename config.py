@@ -104,19 +104,19 @@ confirmer = {}
 
 START_IMG_URL = getenv(
     "START_IMG_URL",
-    "https://ibb.co/TDRPzDwm https://ibb.co/TDRPzDwm https://ibb.co/TDRPzDwm ",
+    "https://ibb.co/6cLj24KK https://ibb.co/6cLj24KK",
 ).split()
     
 PING_IMG_URL = getenv(
-    "PING_IMG_URL", "https://ibb.co/TDRPzDwm"
+    "PING_IMG_URL", "https://ibb.co/6cLj24KK"
 )
 PLAYLIST_IMG_URL = "https://ibb.co/TDRPzDwm"
-STATS_IMG_URL = "https://ibb.co/TDRPzDwm"
-TELEGRAM_AUDIO_URL = "https://ibb.co/TDRPzDwm"
-TELEGRAM_VIDEO_URL = "https://ibb.co/TDRPzDwm"
+STATS_IMG_URL = "https://ibb.co/6cLj24KK"
+TELEGRAM_AUDIO_URL = "https://ibb.co/6cLj24KK"
+TELEGRAM_VIDEO_URL = "https://ibb.co/6cLj24KK"
 STREAM_IMG_URL = "https://ibb.co/TDRPzDwm"
 SOUNCLOUD_IMG_URL = "https://ibb.co/TDRPzDwm"
-YOUTUBE_IMG_URL = "https://ibb.co/TDRPzDwm"
+YOUTUBE_IMG_URL = "https://ibb.co/6cLj24KK"
 SPOTIFY_ARTIST_IMG_URL = "https://graph.org/file/0bb6f36796d496b4254ff.jpg"
 SPOTIFY_ALBUM_IMG_URL = "https://graph.org/file/0bb6f36796d496b4254ff.jpg"
 SPOTIFY_PLAYLIST_IMG_URL = "https://graph.org/file/0bb6f36796d496b4254ff.jpg"
