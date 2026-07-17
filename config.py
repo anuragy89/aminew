@@ -104,11 +104,11 @@ confirmer = {}
 
 START_IMG_URL = getenv(
     "START_IMG_URL",
-    "https://ibb.co/6cLj24KK https://ibb.co/6cLj24KK",
+    "https://ibb.co/mrHPy3t7 https://ibb.co/XrGKScQf",
 ).split()
     
 PING_IMG_URL = getenv(
-    "PING_IMG_URL", "https://ibb.co/6cLj24KK"
+    "PING_IMG_URL", "https://ibb.co/XrGKScQfK"
 )
 PLAYLIST_IMG_URL = "https://ibb.co/TDRPzDwm"
 STATS_IMG_URL = "https://ibb.co/6cLj24KK"
