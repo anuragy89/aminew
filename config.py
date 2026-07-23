@@ -104,23 +104,22 @@ confirmer = {}
 
 START_IMG_URL = getenv(
     "START_IMG_URL",
-    "https://ibb.co/mrHPy3t7 https://ibb.co/XrGKScQf",
+    "https://ibb.co/bgjN4KLb https://ibb.co/R4gJZGRG https://ibb.co/dwhLknkK https://ibb.co/CpwB3Khy",
 ).split()
     
 PING_IMG_URL = getenv(
-    "PING_IMG_URL", "https://ibb.co/XrGKScQfK"
+    "PING_IMG_URL", "https://ibb.co/CpwB3Khy"
 )
-PLAYLIST_IMG_URL = "https://ibb.co/TDRPzDwm"
-STATS_IMG_URL = "https://ibb.co/6cLj24KK"
-TELEGRAM_AUDIO_URL = "https://ibb.co/6cLj24KK"
-TELEGRAM_VIDEO_URL = "https://ibb.co/6cLj24KK"
-STREAM_IMG_URL = "https://ibb.co/TDRPzDwm"
-SOUNCLOUD_IMG_URL = "https://ibb.co/TDRPzDwm"
-YOUTUBE_IMG_URL = "https://ibb.co/6cLj24KK"
+PLAYLIST_IMG_URL = "https://graph.org/file/c95a687e777b55be1c792.jpg"
+STATS_IMG_URL = "https://ibb.co/R4gJZGRG"
+TELEGRAM_AUDIO_URL = "https://telegra.ph/file/492a3bb2e880d19750b79.jpg"
+TELEGRAM_VIDEO_URL = "https://telegra.ph/file/492a3bb2e880d19750b79.jpg"
+STREAM_IMG_URL = "https://graph.org/file/ff2af8d4d10afa1baf49e.jpg"
+SOUNCLOUD_IMG_URL = "https://graph.org/file/c95a687e777b55be1c792.jpg"
+YOUTUBE_IMG_URL = "https://graph.org/file/e8730fdece86a1166f608.jpg"
 SPOTIFY_ARTIST_IMG_URL = "https://graph.org/file/0bb6f36796d496b4254ff.jpg"
 SPOTIFY_ALBUM_IMG_URL = "https://graph.org/file/0bb6f36796d496b4254ff.jpg"
 SPOTIFY_PLAYLIST_IMG_URL = "https://graph.org/file/0bb6f36796d496b4254ff.jpg"
-
 
 
 def time_to_seconds(time):
